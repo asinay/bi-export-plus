@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Export generator="IRIS" version="26">
+  <Document name="bi-export-plus.ZPM">
+    <Module>
+      <Name>bi-export-plus</Name>
+      <Version>1.0.0</Version>
+      <Packaging>module</Packaging>
+      <SourcesRoot>src</SourcesRoot>
+      <Description>Real, binary .xlsx (and typed JSON) exports for the InterSystems IRIS BI/DeepSee Analyzer, replacing the legacy HTML-saved-as-.xls "Export to Excel" behavior. Adds "Excel Workbook" and "JSON" items to the Analyzer's own Export dropdown, plus a standalone REST API for external tools.</Description>
+      <Keywords>bi,deepsee,analyzer,xlsx,excel,export,openpyxl,embedded-python</Keywords>
+      <Author>
+        <Person>Asaf</Person>
+        <License>MIT</License>
+      </Author>
+      <Resource Name="BIExport.PKG"/>
+      <WebApplication
+        Url="/csp/bi-export"
+        NameSpace="${namespace}"
+        DispatchClass="BIExport.REST"
+        PasswordAuthEnabled="1"
+        UnauthenticatedEnabled="0"
+      />
+      <AfterInstallMessage>
+****************************************************************
+Thanks for installing bi-export-plus!
+
+To use the new "Excel Workbook"/"JSON" buttons in the Analyzer's own
+Export dropdown, open your pivots via BIExport.UI.Analyzer.cls instead
+of the stock _DeepSee.UI.Analyzer.zen (same query params, just a
+different class name) - see README.md, "Option A".
+
+A standalone REST API was also registered at /csp/bi-export/xlsx and
+/csp/bi-export/json for external tools/scripts - see README.md, "Option B".
+
+Requires IRIS Embedded Python with openpyxl importable
+(Do ##class(%SYS.Python).Import("openpyxl") to check) for the xlsx
+path specifically; JSON export needs neither. See README.md if that
+import fails.
+****************************************************************
+      </AfterInstallMessage>
+    </Module>
+  </Document>
+</Export>

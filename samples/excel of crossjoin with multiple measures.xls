@@ -1,0 +1,369 @@
+<html xmlns:x="urn:schemas-microsoft-com:office:excel">
+<head>
+<meta charset="utf-8">
+<xml>
+<x:ExcelWorkbook>
+<x:ExcelWorksheets>
+<x:ExcelWorksheet>
+<x:Name>Results</x:Name>
+<x:WorksheetOptions>
+<x:DoNotDisplayGridlines>False</x:DoNotDisplayGridlines>
+</x:WorksheetOptions>
+</x:ExcelWorksheet>
+</x:ExcelWorksheets>
+</x:ExcelWorkbook>
+</xml>
+</head>
+<body>
+<div style="padding:5px;">Aug 12 2026 17:08:16</div>
+<table border="0">
+<tr><th>&nbsp;</th><th style="font-weight: bold;" colspan="4">Test/Crossjoin with multiple measures</th></tr>
+<tr><th>&nbsp;</th></tr>
+</table>
+<table border="1">
+<tr>
+<th style="background:#E0E0FF;mso-number-format:\@">YearSold</th>
+<th style="background:#E0E0FF;mso-number-format:\@">Product Category</th>
+<th style="background:#E0E0FF;mso-number-format:\@">Count</th>
+<th style="background:#E0E0FF;mso-number-format:\@">Revenue</th>
+<th style="background:#E0E0FF;mso-number-format:\@">Units Sold</th>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2021</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Candy</th>
+<td style="mso-number-format:#\,#0\" x:num>14</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>28.55</td>
+<td style="mso-number-format:#\,#0\" x:num>27</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2021</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Cereal</th>
+<td style="mso-number-format:#\,#0\" x:num>1</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>31.6</td>
+<td style="mso-number-format:#\,#0\" x:num>8</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2021</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Dairy</th>
+<td style="mso-number-format:#\,#0\" x:num>6</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>39.27</td>
+<td style="mso-number-format:#\,#0\" x:num>7</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2021</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Fruit</th>
+<td style="mso-number-format:#\,#0\" x:num>8</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>63.53</td>
+<td style="mso-number-format:#\,#0\" x:num>9</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2021</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Pasta</th>
+<td style="mso-number-format:#\,#0\" x:num>23</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>110</td>
+<td style="mso-number-format:#\,#0\" x:num>49</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2021</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Seafood</th>
+<td style="mso-number-format:#\,#0\" x:num>9</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>360.33</td>
+<td style="mso-number-format:#\,#0\" x:num>16</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2021</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Snack</th>
+<td style="mso-number-format:#\,#0\" x:num>45</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>915.96</td>
+<td style="mso-number-format:#\,#0\" x:num>85</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2021</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Vegetable</th>
+<td style="mso-number-format:#\,#0\" x:num>11</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>73.83</td>
+<td style="mso-number-format:#\,#0\" x:num>14</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2022</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Candy</th>
+<td style="mso-number-format:#\,#0\" x:num>17</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>27.73</td>
+<td style="mso-number-format:#\,#0\" x:num>25</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2022</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Cereal</th>
+<td style="mso-number-format:#\,#0\" x:num>2</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>27.26</td>
+<td style="mso-number-format:#\,#0\" x:num>7</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2022</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Dairy</th>
+<td style="mso-number-format:#\,#0\" x:num>4</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>58.91</td>
+<td style="mso-number-format:#\,#0\" x:num>10</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2022</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Fruit</th>
+<td style="mso-number-format:#\,#0\" x:num>21</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>173.59</td>
+<td style="mso-number-format:#\,#0\" x:num>22</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2022</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Pasta</th>
+<td style="mso-number-format:#\,#0\" x:num>29</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>141.72</td>
+<td style="mso-number-format:#\,#0\" x:num>48</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2022</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Seafood</th>
+<td style="mso-number-format:#\,#0\" x:num>5</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>112.46</td>
+<td style="mso-number-format:#\,#0\" x:num>5</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2022</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Snack</th>
+<td style="mso-number-format:#\,#0\" x:num>54</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>555.26</td>
+<td style="mso-number-format:#\,#0\" x:num>82</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2022</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Vegetable</th>
+<td style="mso-number-format:#\,#0\" x:num>21</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>194.65</td>
+<td style="mso-number-format:#\,#0\" x:num>36</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2023</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Candy</th>
+<td style="mso-number-format:#\,#0\" x:num>16</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>32.01</td>
+<td style="mso-number-format:#\,#0\" x:num>30</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2023</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Cereal</th>
+<td style="mso-number-format:#\,#0\" x:num>4</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>23.31</td>
+<td style="mso-number-format:#\,#0\" x:num>9</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2023</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Dairy</th>
+<td style="mso-number-format:#\,#0\" x:num>9</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>149.95</td>
+<td style="mso-number-format:#\,#0\" x:num>27</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2023</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Fruit</th>
+<td style="mso-number-format:#\,#0\" x:num>32</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>354.94</td>
+<td style="mso-number-format:#\,#0\" x:num>51</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2023</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Pasta</th>
+<td style="mso-number-format:#\,#0\" x:num>44</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>247.66</td>
+<td style="mso-number-format:#\,#0\" x:num>92</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2023</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Seafood</th>
+<td style="mso-number-format:#\,#0\" x:num>6</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>112.47</td>
+<td style="mso-number-format:#\,#0\" x:num>6</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2023</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Snack</th>
+<td style="mso-number-format:#\,#0\" x:num>54</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>676.95</td>
+<td style="mso-number-format:#\,#0\" x:num>83</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2023</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Vegetable</th>
+<td style="mso-number-format:#\,#0\" x:num>18</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>96.26</td>
+<td style="mso-number-format:#\,#0\" x:num>18</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2024</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Candy</th>
+<td style="mso-number-format:#\,#0\" x:num>17</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>37.28</td>
+<td style="mso-number-format:#\,#0\" x:num>36</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2024</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Cereal</th>
+<td style="mso-number-format:#\,#0\" x:num>3</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>27.26</td>
+<td style="mso-number-format:#\,#0\" x:num>7</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2024</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Dairy</th>
+<td style="mso-number-format:#\,#0\" x:num>11</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>73.79</td>
+<td style="mso-number-format:#\,#0\" x:num>13</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2024</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Fruit</th>
+<td style="mso-number-format:#\,#0\" x:num>35</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>494.76</td>
+<td style="mso-number-format:#\,#0\" x:num>70</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2024</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Pasta</th>
+<td style="mso-number-format:#\,#0\" x:num>46</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>227.04</td>
+<td style="mso-number-format:#\,#0\" x:num>86</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2024</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Seafood</th>
+<td style="mso-number-format:#\,#0\" x:num>10</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>307.55</td>
+<td style="mso-number-format:#\,#0\" x:num>14</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2024</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Snack</th>
+<td style="mso-number-format:#\,#0\" x:num>69</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>960.58</td>
+<td style="mso-number-format:#\,#0\" x:num>110</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2024</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Vegetable</th>
+<td style="mso-number-format:#\,#0\" x:num>24</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>280.8</td>
+<td style="mso-number-format:#\,#0\" x:num>50</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2025</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Candy</th>
+<td style="mso-number-format:#\,#0\" x:num>24</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>49.26</td>
+<td style="mso-number-format:#\,#0\" x:num>47</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2025</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Cereal</th>
+<td style="mso-number-format:#\,#0\" x:num>2</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>7.12</td>
+<td style="mso-number-format:#\,#0\" x:num>2</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2025</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Dairy</th>
+<td style="mso-number-format:#\,#0\" x:num>5</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>35.7</td>
+<td style="mso-number-format:#\,#0\" x:num>6</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2025</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Fruit</th>
+<td style="mso-number-format:#\,#0\" x:num>31</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>465.68</td>
+<td style="mso-number-format:#\,#0\" x:num>62</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2025</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Pasta</th>
+<td style="mso-number-format:#\,#0\" x:num>39</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>157.18</td>
+<td style="mso-number-format:#\,#0\" x:num>62</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2025</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Seafood</th>
+<td style="mso-number-format:#\,#0\" x:num>6</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>179.02</td>
+<td style="mso-number-format:#\,#0\" x:num>8</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2025</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Snack</th>
+<td style="mso-number-format:#\,#0\" x:num>58</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>729.03</td>
+<td style="mso-number-format:#\,#0\" x:num>98</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2025</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Vegetable</th>
+<td style="mso-number-format:#\,#0\" x:num>33</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>235.52</td>
+<td style="mso-number-format:#\,#0\" x:num>44</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2026</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Candy</th>
+<td style="mso-number-format:#\,#0\" x:num>13</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>14.29</td>
+<td style="mso-number-format:#\,#0\" x:num>13</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2026</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Cereal</th>
+<td style="mso-number-format:#\,#0\" x:num>1</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>3.56</td>
+<td style="mso-number-format:#\,#0\" x:num>1</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2026</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Dairy</th>
+<td style="mso-number-format:#\,#0\" x:num>7</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>40.46</td>
+<td style="mso-number-format:#\,#0\" x:num>7</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2026</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Fruit</th>
+<td style="mso-number-format:#\,#0\" x:num>25</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>240.44</td>
+<td style="mso-number-format:#\,#0\" x:num>33</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2026</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Pasta</th>
+<td style="mso-number-format:#\,#0\" x:num>26</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>109.56</td>
+<td style="mso-number-format:#\,#0\" x:num>40</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2026</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Seafood</th>
+<td style="mso-number-format:#\,#0\" x:num>6</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>130.82</td>
+<td style="mso-number-format:#\,#0\" x:num>6</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2026</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Snack</th>
+<td style="mso-number-format:#\,#0\" x:num>44</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>385.36</td>
+<td style="mso-number-format:#\,#0\" x:num>73</td>
+</tr>
+<tr>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:0">2026</th>
+<th style="text-align:left;background:#E0E0FF;mso-number-format:\@">Vegetable</th>
+<td style="mso-number-format:#\,#0\" x:num>12</td>
+<td style="mso-number-format:$#\,#0\.00" x:num>158.98</td>
+<td style="mso-number-format:#\,#0\" x:num>30</td>
+</tr>
+</table>
+</body>
+</html>
