@@ -1,0 +1,1220 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Export generator="IRIS" version="26" zv="IRIS for Windows (x86-64) 2026.1 (Build 234U)" ts="2026-08-13 22:22:27">
+<Class name="BIExport.MDXExport">
+<Description><![CDATA[
+Executes an MDX query and flattens the resulting cellset (or drillthrough listing)
+into a normalized, JSON-friendly structure that <class>BIExport.XLSXWriter</class>
+(or any other renderer) can consume without needing to know anything about
+%DeepSee.ResultSet. Mirrors the cellset-walking logic used by the stock
+Analyzer export buttons (%DeepSee.UI.MDXExcel / %DeepSee.Component.deepseeCSVProvider)
+but keeps real values/types instead of pre-formatting everything as HTML/CSV text.]]></Description>
+<Super>%RegisteredObject</Super>
+<TimeChanged>67795,64951.0911592</TimeChanged>
+<TimeCreated>67795,64951.0911592</TimeCreated>
+
+<Method name="BuildExportData">
+<Description>
+pOptions supported keys (all optional):
+  title, subtitle       - %String, printed above the table
+  cube                  - %String, cube name/caption - shown on the Info sheet even
+                           when title is blank (e.g. an ad-hoc pivot that was never
+                           saved, so has no name to show)
+  listing               - %String, listing name to use if the MDX is a drillthrough/listing query
+  totals                - %Boolean, include row/column totals (default false)
+  filters               - array of {name, value} objects, printed as a recap block
+  rowCaptions            - the row axis's dimension/level captions (e.g. "YearSold",
+                           "Product Category"), outermost first. The ResultSet API has
+                           no way to derive these itself - they're metadata the pivot
+                           table widget already has client-side (this is exactly what
+                           the stock exportExcel() passes as ROWCAPTIONS, sourced from
+                           table.getRowCaptions().join('\n') - see BIExport.UI.Analyzer's
+                           buildExportURL()). Accepts either a %DynamicArray of strings
+                           or a single "\n"-delimited %String in that same format.</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pMDX:%String,pOptions:%DynamicObject=""</FormalSpec>
+<ReturnType>%DynamicObject</ReturnType>
+<Implementation><![CDATA[
+    If '$IsObject(pOptions) { Set pOptions = {} }
+    Set tResult = {}
+    Set tResult."title" = ..%StrOrNull(pOptions.title)
+    Set tResult."subtitle" = ..%StrOrNull(pOptions.subtitle)
+    Set tResult."cube" = ..%StrOrNull(pOptions.cube)
+    If (pOptions.filters = "") {
+        Set tResult.filters = []
+    } Else {
+        Set tResult.filters = pOptions.filters
+    }
+    Set tRowCaptions = ..%ParseCaptions(pOptions.%Get("rowCaptions"))
+
+    Set tRS = ##class(%DeepSee.ResultSet).%New()
+    Set tSC = tRS.%PrepareMDX(pMDX)
+    If $$$ISERR(tSC) Throw ##class(%Exception.StatusException).CreateFromStatus(tSC)
+
+    Set tListingName = pOptions.%Get("listing", "")
+    If (tListingName '= "") {
+        Set tSC = tRS.%SetListing(tListingName)
+        If $$$ISERR(tSC) Throw ##class(%Exception.StatusException).CreateFromStatus(tSC)
+    }
+    Set tRS.%Query.%MaxListingRows = 0
+
+    Set tSC = tRS.%ExecuteAsynch(,,1)
+    If $$$ISERR(tSC) Throw ##class(%Exception.StatusException).CreateFromStatus(tSC)
+
+    If tRS.%IsDrillThrough() {
+        Set tResult.kind = "listing"
+        Do ..%BuildListing(tRS, tResult)
+    } Else {
+        Set tResult.kind = "cellset"
+        Set tTotals = $Select($IsObject(pOptions):(pOptions.totals=1),1:0)
+        Do ..%BuildCellset(tRS, tResult, tTotals)
+
+        Set tRowHeaderNames = []
+        For n=1:1:tResult.rowHeaderDepth {
+            Do tRowHeaderNames.%Push($Select(n<=tRowCaptions.Count():tRowCaptions.GetAt(n),1:""))
+        }
+        Set tResult.rowHeaderNames = tRowHeaderNames
+    }
+
+    Quit tResult
+]]></Implementation>
+</Method>
+
+<Method name="%ParseFilterPairs">
+<Description>
+Builds a filters array (in the {name,value} shape BuildExportData's "filters"
+option expects) from two parallel "\n"-delimited strings - the same shape
+XLSXPage.cls/JSONPage.cls receive via FILTERNAMES/FILTERVALUES query params,
+sourced from the pivot table widget's own table.getFilterInfo() client-side
+(mirroring what stock exportExcel() does with those same two arrays).</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pNames:%String,pValues:%String</FormalSpec>
+<ReturnType>%DynamicArray</ReturnType>
+<Implementation><![CDATA[
+    Set tResult = []
+    If (pNames = "") Quit tResult
+    Set tCount = $Length(pNames,$C(10))
+    For i=1:1:tCount {
+        Do tResult.%Push({"name": ($Piece(pNames,$C(10),i)), "value": ($Piece(pValues,$C(10),i))})
+    }
+    Quit tResult
+]]></Implementation>
+</Method>
+
+<Method name="%ParseCaptions">
+<Description>
+Normalizes pValue (either a %DynamicArray of strings, or a single "\n"-delimited
+%String) into a %ListOfDataTypes of caption strings, outermost first.</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pValue</FormalSpec>
+<Private>1</Private>
+<ReturnType>%ListOfDataTypes</ReturnType>
+<Implementation><![CDATA[
+    Set tList = ##class(%ListOfDataTypes).%New()
+    If $IsObject($Get(pValue)) {
+        For i=0:1:pValue.%Size()-1 { Do tList.Insert(pValue.%Get(i)) }
+    } ElseIf ($Get(pValue) '= "") {
+        For i=1:1:$Length(pValue,$C(10)) { Do tList.Insert($Piece(pValue,$C(10),i)) }
+    }
+    Quit tList
+]]></Implementation>
+</Method>
+
+<Method name="%StrOrNull">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pValue</FormalSpec>
+<ReturnType>%String</ReturnType>
+<Implementation><![CDATA[    Quit $Select($IsObject($Get(pValue)):"",1:$Get(pValue,""))
+]]></Implementation>
+</Method>
+
+<Method name="%BuildListing">
+<Description>
+Flattens a drillthrough/listing result into {columns:[{name,numeric}], rows:[[...]]}</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pRS:%DeepSee.ResultSet,pResult:%DynamicObject</FormalSpec>
+<Private>1</Private>
+<Implementation><![CDATA[
+    Set tSC = pRS.%GetListingResultSet(.tListingRS, .tListingFields)
+    If $$$ISERR(tSC) Throw ##class(%Exception.StatusException).CreateFromStatus(tSC)
+
+    Set tColumnMeta = tListingRS.%GetMetaData().columns
+    Set tColumns = []
+    If (tListingFields = "") {
+        Set tColCount = tColumnMeta.Count()
+        For c=1:1:tColCount {
+            Set tInfo = tColumnMeta.GetAt(c)
+            Set tNumeric = $Case(tInfo.ODBCType, 2:1, 4:1, 8:1, :0)
+            Do tColumns.%Push({"name": (tInfo.colName), "numeric": (tNumeric)})
+        }
+    } Else {
+        Set tColCount = $ListLength(tListingFields)
+        For c=1:1:tColCount {
+            Do tColumns.%Push({"name": ($ListGet(tListingFields,c)), "numeric": 0})
+        }
+    }
+    Set pResult.columns = tColumns
+
+    Set tRows = []
+    While tListingRS.%Next(.tSC) {
+        If $$$ISERR(tSC) Throw ##class(%Exception.StatusException).CreateFromStatus(tSC)
+        Set tRow = []
+        For c=1:1:tColCount {
+            If (tListingFields = "") {
+                Set tValue = tListingRS.%GetData(c)
+            } Else {
+                Set tValue = tListingRS.%Get($ListGet(tListingFields,c))
+            }
+            Do tRow.%Push(tValue)
+        }
+        Do tRows.%Push(tRow)
+    }
+    Set pResult.rows = tRows
+]]></Implementation>
+</Method>
+
+<Method name="%BuildCellset">
+<Description>
+Flattens an MDX cellset into headers + typed data cells (+ optional totals).</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pRS:%DeepSee.ResultSet,pResult:%DynamicObject,pTotals:%Boolean</FormalSpec>
+<Private>1</Private>
+<Implementation><![CDATA[
+    Set tAxisCount = pRS.%GetAxisCount()
+
+    // Single-value answer (no axes) - report it as a 1x1 table.
+    If (tAxisCount = 0) {
+        Set tValue = pRS.%GetValue()
+        Set pResult.colHeaderDepth = 1
+        Set pResult.rowHeaderDepth = 1
+        Set pResult.colCount = 1
+        Set pResult.rowCount = 1
+        Set pResult.columnHeaders = [["All"]]
+        Set pResult.rowHeaders = [["Count"]]
+        Set tCell = ..%MakeNumericCell(tValue, "")
+        Set tRowArr = []
+        Do tRowArr.%Push(tCell)
+        Set tData = []
+        Do tData.%Push(tRowArr)
+        Set pResult.cells = tData
+        Quit
+    }
+
+    For a=1:1:tAxisCount { Set tAxisSize(a) = pRS.%GetAxisSize(a) }
+    Set tColCount = +$Get(tAxisSize(1))
+    Set tHasRows = (tAxisCount >= 2)
+    Set tRowCount = $Select(tHasRows:+$Get(tAxisSize(2)),1:1)
+
+    If (tColCount = 0) || (tRowCount = 0) {
+        Set pResult.colHeaderDepth = 0
+        Set pResult.rowHeaderDepth = 0
+        Set pResult.colCount = 0
+        Set pResult.rowCount = 0
+        Set pResult.columnHeaders = []
+        Set pResult.rowHeaders = []
+        Set pResult.cells = []
+        Quit
+    }
+
+    // First pass: column headers + per-column format/solve order.
+    Set tColHeaderDepth = 1
+    For c=1:1:tColCount {
+        Kill tNames
+        Set tCount = pRS.%GetOrdinalLabel(.tNames,1,c,.tFormat,.tSolveOrder)
+        Set:(tCount>tColHeaderDepth) tColHeaderDepth = tCount
+        Set tColFormat(c) = tFormat
+        Set tColSolveOrder(c) = tSolveOrder
+        For n=1:1:tCount { Set tColLabel(c,n) = $Get(tNames(n)) }
+    }
+
+    // Second pass: row headers + per-row format/solve order.
+    Set tRowHeaderDepth = 1
+    If (tHasRows) {
+        For r=1:1:tRowCount {
+            Kill tLabels
+            Set tCount = pRS.%GetOrdinalLabel(.tLabels,2,r,.tFormat,.tSolveOrder)
+            Set:(tCount>tRowHeaderDepth) tRowHeaderDepth = tCount
+            Set tRowFormat(r) = tFormat
+            Set tRowSolveOrder(r) = tSolveOrder
+            For n=1:1:tCount { Set tRowLabel(r,n) = $Get(tLabels(n)) }
+        }
+    } Else {
+        Set tRowFormat(1) = ""
+        Set tRowSolveOrder(1) = 0
+        Set tRowLabel(1,1) = "Results"
+    }
+
+    Set tDefaultFormat = pRS.%GetDefaultFormat()
+    Set tHasOverride = pRS.%HasCellFormatOverride()
+
+    // Column headers, outermost (depth tColHeaderDepth) first, innermost (1) last - top-to-bottom.
+    Set tColumnHeaders = []
+    For lvl=tColHeaderDepth:-1:1 {
+        Set tRowOfHeaders = []
+        For c=1:1:tColCount {
+            Do tRowOfHeaders.%Push($Get(tColLabel(c,lvl)))
+        }
+        Do tColumnHeaders.%Push(tRowOfHeaders)
+    }
+    Set pResult.columnHeaders = tColumnHeaders
+
+    // Row headers, outermost (depth) first, innermost (1) last - left-to-right per row.
+    Set tRowHeaders = []
+    For r=1:1:tRowCount {
+        Set tHeaderRow = []
+        For lvl=tRowHeaderDepth:-1:1 {
+            Do tHeaderRow.%Push($Get(tRowLabel(r,lvl)))
+        }
+        Do tRowHeaders.%Push(tHeaderRow)
+    }
+    Set pResult.rowHeaders = tRowHeaders
+
+    Set pResult.colHeaderDepth = tColHeaderDepth
+    Set pResult.rowHeaderDepth = tRowHeaderDepth
+    Set pResult.colCount = tColCount
+    Set pResult.rowCount = tRowCount
+
+    // Data cells.
+    Set tData = []
+    For r=1:1:tRowCount {
+        Set tRowArr = []
+        For c=1:1:tColCount {
+            Set tValue = $Case(tAxisCount, 1:pRS.%GetOrdinalValue(c), :pRS.%GetOrdinalValue(c,r))
+
+            If (+$Get(tColSolveOrder(c)) >= +$Get(tRowSolveOrder(r))) {
+                Set tFormat = $Select($Get(tColFormat(c))'="":tColFormat(c), $Get(tRowFormat(r))'="":tRowFormat(r), 1:tDefaultFormat)
+            } Else {
+                Set tFormat = $Select($Get(tRowFormat(r))'="":tRowFormat(r), $Get(tColFormat(c))'="":tColFormat(c), 1:tDefaultFormat)
+            }
+            If ((tAxisCount>1) && tHasOverride) {
+                Set tFO = pRS.%GetCellFormatOverride(c,r)
+                Set:tFO'="" tFormat = tFO
+            }
+
+            Do tRowArr.%Push(..%MakeCell(tValue, tFormat))
+        }
+        Do tData.%Push(tRowArr)
+    }
+    Set pResult.cells = tData
+
+    If ('pTotals) Quit
+
+    // Column totals (one value per column, summed down the rows) + row totals (one per row) + grand total.
+    Set tColTotals = []
+    For c=1:1:tColCount {
+        Set tFormat = $Select($Get(tColFormat(c))'="":tColFormat(c),1:tDefaultFormat)
+        Do tColTotals.%Push(..%MakeCell(pRS.%GetColumnTotal(c),tFormat))
+    }
+    Set pResult.columnTotals = tColTotals
+
+    Set tRowTotals = []
+    Set tGrandTotal = 0
+    For r=1:1:tRowCount {
+        Set tFormat = $Select($Get(tRowFormat(r))'="":tRowFormat(r),1:tDefaultFormat)
+        Set tSum = pRS.%GetRowTotal(r)
+        Set tGrandTotal = tGrandTotal + tSum
+        Do tRowTotals.%Push(..%MakeCell(tSum,tFormat))
+    }
+    Set pResult.rowTotals = tRowTotals
+    Set pResult.grandTotal = ..%MakeCell(tGrandTotal,tDefaultFormat)
+]]></Implementation>
+</Method>
+
+<Method name="%MakeCell">
+<Description>
+Builds a typed cell object {t, v, fmt} from a raw MDX cell value + MDX format string.</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pValue,pFormat:%String</FormalSpec>
+<Private>1</Private>
+<ReturnType>%DynamicObject</ReturnType>
+<Implementation><![CDATA[
+    If (pFormat = "%string%") {
+        Quit {"t":"s","v":(pValue),"fmt":"@"}
+    }
+    ElseIf (pFormat = "%date%") {
+        If (pValue = "") {
+            Quit {"t":"s","v":""}
+        }
+        Set tISO = $ZDT(pValue\1,3)
+        Quit {"t":"d","v":(tISO),"fmt":"mm/dd/yyyy"}
+    }
+    ElseIf (pFormat = "%time%") {
+        Quit {"t":"t","v":(+pValue),"fmt":"[h]:mm:ss"}
+    }
+    Else {
+        Quit ..%MakeNumericCell(pValue, pFormat)
+    }
+]]></Implementation>
+</Method>
+
+<Method name="%MakeNumericCell">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pValue,pFormat:%String</FormalSpec>
+<Private>1</Private>
+<ReturnType>%DynamicObject</ReturnType>
+<Implementation><![CDATA[
+    If $IsValidNum(pValue) {
+        Quit {"t":"n","v":(+pValue),"fmt":(..%TranslateFormat(pFormat))}
+    }
+    Quit {"t":"s","v":(pValue),"fmt":"@"}
+]]></Implementation>
+</Method>
+
+<Method name="%TranslateFormat">
+<Description>
+Translates an MDX/ODBC-style number format string (e.g. "#,#0.00", "$#,#0") into a
+standard Excel number_format string. Real xlsx formats don't need the backslash
+escaping the legacy HTML "mso-number-format" trick required.</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pFormat:%String</FormalSpec>
+<Private>1</Private>
+<ReturnType>%String</ReturnType>
+<Implementation><![CDATA[
+    If (pFormat = "") Quit "#,##0"
+
+    Set tHasPercent = (pFormat["%")
+    Set tHasComma = (pFormat[",")
+    Set tHasDollar = (pFormat["$")
+
+    Set tScale = 0
+    Set tDot = $Find(pFormat,".")
+    If (tDot) {
+        Set p = tDot
+        While $Case($Extract(pFormat,p),"#":1,"0":1,:0) {
+            Set tScale = tScale + 1
+            Set p = p + 1
+        }
+    }
+
+    Set tInt = $Select(tHasComma:"#,##0",1:"0")
+    Set tOut = $Select(tScale>0:tInt_"."_$Translate($Justify("",tScale)," ","0"),1:tInt)
+    Set:tHasDollar tOut = "$"_tOut
+    Set:tHasPercent tOut = tOut_"%"
+    Quit tOut
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="BIExport.PyTest">
+<Super>%RegisteredObject</Super>
+<TimeChanged>67795,64951.1378584</TimeChanged>
+<TimeCreated>67795,64951.1378584</TimeCreated>
+
+<Method name="BuildTiny">
+<ClassMethod>1</ClassMethod>
+<Language>python</Language>
+<ReturnType>%Binary</ReturnType>
+<Implementation><![CDATA[
+import openpyxl
+import io
+
+wb = openpyxl.Workbook()
+ws = wb.active
+ws.title = "Test"
+ws["A1"] = "Hello"
+ws["B1"] = 42
+ws["B1"].number_format = "#,##0"
+
+buf = io.BytesIO()
+wb.save(buf)
+return buf.getvalue()
+]]></Implementation>
+</Method>
+
+<Method name="WriteTinyToFile">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pFile:%String</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    Set tSC = $$$OK
+    Try {
+        Set tBytes = ..BuildTiny()
+        Set tStream = ##class(%Stream.FileBinary).%New()
+        Set tSC = tStream.LinkToFile(pFile)
+        If $$$ISERR(tSC) Quit
+        Do tStream.Write(tBytes)
+        Set tSC = tStream.%Save()
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="BraceTest">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pJSON:%String</FormalSpec>
+<Language>python</Language>
+<ReturnType>%String</ReturnType>
+<Implementation><![CDATA[
+import json
+data = json.loads(pJSON)
+d = {"a": 1, "b": {"nested": [1, 2, 3]}}
+name = data.get("name", "world")
+msg = f"hello {name}, keys={list(d.keys())}"
+return msg
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="BIExport.REST">
+<Description>
+REST service exposing real-file BI exports (starting with genuine .xlsx,
+replacing the Analyzer's HTML-saved-as-.xls behavior). See CLAUDE.md for
+the design rationale and docs/iris-environment.md for how this is deployed.</Description>
+<Super>%CSP.REST</Super>
+<TimeChanged>67795,64951.1918431</TimeChanged>
+<TimeCreated>67795,64951.1918431</TimeCreated>
+
+<Parameter name="HandleCorsRequest">
+<Default>0</Default>
+</Parameter>
+
+<XData name="UrlMap">
+<Data><![CDATA[
+<Routes>
+<Route Url="/xlsx" Method="POST" Call="ExportXLSX"/>
+<Route Url="/json" Method="POST" Call="ExportJSON"/>
+</Routes>
+]]></Data>
+</XData>
+
+<Method name="ExportXLSX">
+<Description><![CDATA[
+POST body (JSON): {
+  "mdx": "<MDX query text>",         - required
+  "filename": "report.xlsx",         - optional, defaults to "<title>.xlsx", or
+                                       "<cube>_<timestamp>.xlsx" if no title
+  "title": "...", "subtitle": "...", - optional, shown on the Info sheet
+  "cube": "HoleFoods Sales",         - optional, shown on the Info sheet even with
+                                       no title, and used in the default filename
+  "listing": "ListingName",          - optional, for drillthrough/listing MDX
+  "totals": true,                    - optional, include row/column totals
+  "filters": [{"name":"...","value":"..."}]  - optional, recap block on the Info sheet
+  "rowCaptions": ["YearSold", ...]   - optional, row axis dimension captions (outermost
+                                       first) for the row-header columns; the MDX/
+                                       ResultSet API can't derive these on its own -
+                                       this is metadata an external caller would need
+                                       to already know from how it built the MDX
+}]]></Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    Set tSC = $$$OK
+    Try {
+        Set tBody = %request.Content
+        Do tBody.Rewind()
+        Set tJSONIn = tBody.Read(tBody.Size)
+
+        Set tReq = {}.%FromJSON(tJSONIn)
+        Set tMDX = tReq.%Get("mdx", "")
+        If (tMDX = "") {
+            Set %response.Status = "400 Bad Request"
+            Write "Missing required 'mdx' field"
+            Quit
+        }
+
+        Set tData = ##class(BIExport.MDXExport).BuildExportData(tMDX, tReq)
+        Set tJSON = tData.%ToJSON()
+        Set tBytes = ##class(BIExport.XLSXWriter).BuildXLSX(tJSON)
+
+        Set tFileName = tReq.%Get("filename", ..%DefaultFileName(tReq, "xlsx"))
+
+        Set %response.ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        Do %response.SetHeader("Content-Disposition", "attachment; filename=""" _ tFileName _ """")
+
+        Set tStream = ##class(%Stream.TmpBinary).%New()
+        Do tStream.Write(tBytes)
+        Do tStream.Rewind()
+        Do tStream.OutputToDevice()
+    }
+    Catch ex {
+        Set %response.Status = "500 Internal Server Error"
+        Set %response.ContentType = "text/plain"
+        Write ex.DisplayString()
+    }
+    Quit $$$OK
+]]></Implementation>
+</Method>
+
+<Method name="ExportJSON">
+<Description>
+POST body (JSON): same fields as /xlsx (mdx, filename, title, subtitle, listing,
+totals, filters) - returns BIExport.MDXExport's normalized structure as-is. No
+Python involved: %DynamicObject already has %ToJSON(), so this is pure ObjectScript.</Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    Set tSC = $$$OK
+    Try {
+        Set tBody = %request.Content
+        Do tBody.Rewind()
+        Set tJSONIn = tBody.Read(tBody.Size)
+
+        Set tReq = {}.%FromJSON(tJSONIn)
+        Set tMDX = tReq.%Get("mdx", "")
+        If (tMDX = "") {
+            Set %response.Status = "400 Bad Request"
+            Write "Missing required 'mdx' field"
+            Quit
+        }
+
+        Set tData = ##class(BIExport.MDXExport).BuildExportData(tMDX, tReq)
+
+        Set tFileName = tReq.%Get("filename", ..%DefaultFileName(tReq, "json"))
+
+        Set %response.ContentType = "application/json"
+        Do %response.SetHeader("Content-Disposition", "attachment; filename=""" _ tFileName _ """")
+
+        Do tData.%ToJSON()
+    }
+    Catch ex {
+        Set %response.Status = "500 Internal Server Error"
+        Set %response.ContentType = "text/plain"
+        Write ex.DisplayString()
+    }
+    Quit $$$OK
+]]></Implementation>
+</Method>
+
+<Method name="%DefaultFileName">
+<Description><![CDATA[
+Filename to use when the caller didn't supply one: "<title>.<ext>" if a title
+was given, else "<cube or 'export'>_<short timestamp>.<ext>" - matches
+BIExport.UI.Analyzer.buildExportURL()'s fallback for an ad-hoc pivot with no
+saved name to hang a filename on, so repeated title-less exports don't all
+collide on a single literal "export.xlsx".]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pReq:%DynamicObject,pExt:%String</FormalSpec>
+<Private>1</Private>
+<ReturnType>%String</ReturnType>
+<Implementation><![CDATA[
+    Set tTitle = pReq.%Get("title", "")
+    If (tTitle '= "") {
+        Quit tTitle _ "." _ pExt
+    }
+    Set tCube = pReq.%Get("cube", "")
+    Set tBase = $Select(tCube'="":tCube,1:"export")
+    Set tTS = $TR($ZDate($H,8),"-") _ "-" _ $Extract($TR($ZTime($Piece($H,",",2),1),":"),1,4)
+    Quit tBase _ "_" _ tTS _ "." _ pExt
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="BIExport.UI.Analyzer">
+<Description><![CDATA[
+Thin subclass of the stock BI Analyzer page that adds real "Excel Workbook" (.xlsx)
+and "JSON" options to the existing Export dropdown (alongside Excel/CSV/CSV with
+Heading), calling <class>BIExport.UI.XLSXPage</class>/<class>BIExport.UI.JSONPage</class>
+instead of the HTML-saved-as-.xls exporter.
+
+Reachable at the same CSP application as the stock page, just under this class's
+name instead of the "_DeepSee.UI.Analyzer.zen" alias, e.g.
+/csp/<namespace>/BIExport.UI.Analyzer.cls?CUBE=... - point any links/shortcuts at
+this URL instead of the stock one to pick up the new options.]]></Description>
+<Super>%DeepSee.UI.Analyzer</Super>
+<TimeChanged>67795,64951.3229184</TimeChanged>
+<TimeCreated>67795,64951.3229184</TimeCreated>
+
+<Method name="onloadHandler">
+<Description>
+Runs after the stock page finishes its own load logic; DOM-patches the existing
+Export dropdown to add "Excel Workbook" and "JSON" items. Implemented as a DOM
+patch (rather than duplicating the dropdown-building code) so it keeps working
+even if the stock page's internal markup/ids change across versions.</Description>
+<Language>javascript</Language>
+<ClientMethod>1</ClientMethod>
+<Implementation><![CDATA[
+    this.invokeSuper('onloadHandler', arguments);
+    this.addExtraExportOptions();
+]]></Implementation>
+</Method>
+
+<Method name="addExtraExportOptions">
+<Language>javascript</Language>
+<ClientMethod>1</ClientMethod>
+<Implementation><![CDATA[
+    try {
+        var menus = document.querySelectorAll('.dsptIconDropdownMenu');
+        for (var i = 0; i < menus.length; i++) {
+            var menu = menus[i];
+            if (menu.getAttribute('data-extraExportAdded')) { continue; }
+
+            var links = menu.getElementsByTagName('a');
+            var excelLink = null;
+            for (var j = 0; j < links.length; j++) {
+                var onclickAttr = links[j].getAttribute('onclick') || '';
+                if (onclickAttr.indexOf('exportExcel') >= 0) {
+                    excelLink = links[j];
+                    break;
+                }
+            }
+            if (!excelLink) { continue; }
+
+            var match = (excelLink.getAttribute('onclick') || '').match(/toggleExportMenu\('([^']+)'\)/);
+            var menuId = match ? match[1] : '';
+
+            var xlsxLink = document.createElement('a');
+            xlsxLink.setAttribute('title', 'Microsoft Excel Workbook (.xlsx)');
+            xlsxLink.setAttribute('onclick', "zenPage.toggleExportMenu('" + menuId + "');zenPage.exportXLSX();");
+            xlsxLink.textContent = 'Excel Workbook';
+            excelLink.parentNode.insertBefore(xlsxLink, excelLink.nextSibling);
+
+            var jsonLink = document.createElement('a');
+            jsonLink.setAttribute('title', 'JSON (.json)');
+            jsonLink.setAttribute('onclick', "zenPage.toggleExportMenu('" + menuId + "');zenPage.exportJSON();");
+            jsonLink.textContent = 'JSON';
+            xlsxLink.parentNode.insertBefore(jsonLink, xlsxLink.nextSibling);
+
+            menu.setAttribute('data-extraExportAdded', '1');
+        }
+    }
+    catch (e) {
+        // Non-fatal: if the stock page's DOM structure ever changes enough that this
+        // stops finding the menu, just skip adding the options rather than break the page.
+    }
+]]></Implementation>
+</Method>
+
+<Method name="exportXLSX">
+<Description>
+Opens the real .xlsx export page for the current pivot. See buildExportURL for
+why this opens a same-application CSP page instead of calling BIExport.REST.</Description>
+<Language>javascript</Language>
+<ClientMethod>1</ClientMethod>
+<Implementation><![CDATA[
+    var url = this.buildExportURL('BIExport.UI.XLSXPage.cls', 'xlsx');
+    if (url) { window.open(url, 'xlsx', ''); }
+]]></Implementation>
+</Method>
+
+<Method name="exportJSON">
+<Description>
+Opens the JSON export page for the current pivot. See buildExportURL for why
+this opens a same-application CSP page instead of calling BIExport.REST.</Description>
+<Language>javascript</Language>
+<ClientMethod>1</ClientMethod>
+<Implementation><![CDATA[
+    var url = this.buildExportURL('BIExport.UI.JSONPage.cls', 'json');
+    if (url) { window.open(url, 'json', ''); }
+]]></Implementation>
+</Method>
+
+<Method name="buildExportURL">
+<Description>
+Mirrors exportExcel()'s gathering of the current pivot's MDX/title, but points at
+one of our own plain CSP pages (in this SAME application, not the separate
+BIExport.REST application) so the browser's existing Analyzer login session covers
+it - exactly the same reason exportExcel() itself uses window.open() to a sibling
+page rather than a cross-application fetch. Shared by exportXLSX()/exportJSON();
+pPage is the target page class name, pExtension the default filename extension.</Description>
+<FormalSpec>pPage,pExtension</FormalSpec>
+<Language>javascript</Language>
+<ClientMethod>1</ClientMethod>
+<Implementation><![CDATA[
+    var table = this.getPivot();
+    if (!table || ('' == table.cubeName) || ('' == table.queryKey)) {
+        return '';
+    }
+
+    var mdx = table.GetCurrentQueryText("export");
+    var nonce = '';
+    if (mdx.toString().length > 1000) {
+        // avoid long urls for IE!
+        nonce = this.CreateQueryNonce(mdx);
+        if (nonce.toString().indexOf('ERROR:') >= 0) {
+            alert(nonce);
+            return '';
+        }
+    }
+
+    var url;
+    if (nonce) {
+        url = pPage + '?NONCE=' + encodeURIComponent(nonce);
+    }
+    else {
+        url = pPage + '?MDX=' + encodeURIComponent(mdx);
+    }
+
+    var title = table.printTitle;
+    var subtitle = table.printSubtitle;
+    if (title == '') {
+        title = this.pivotName;
+        if (title != '') {
+            var s = title.toString().split('.');
+            s.length = s.length - 1;
+            title = s.join('.');
+        }
+    }
+    // Strip any BI-folder path prefix ("Test/Crossjoin...") - that's portal
+    // organization, not part of the report's identity, and shouldn't leak into
+    // the filename or the Info sheet's title.
+    if (title.indexOf('/') >= 0) {
+        var pathParts = title.split('/');
+        title = pathParts[pathParts.length - 1];
+    }
+    url += '&TITLE=' + encodeURIComponent(title);
+    url += '&SUBTITLE=' + encodeURIComponent(subtitle);
+    url += '&CUBE=' + encodeURIComponent(table.cubeName || '');
+    if (table.listing != '') {
+        url += '&LISTINGNAME=' + encodeURIComponent(table.listing);
+    }
+    if (table.rowTotals || table.columnTotals) {
+        url += '&TOTALS=1';
+    }
+    // Row axis dimension/level captions (e.g. "YearSold","Product Category") - the
+    // ResultSet API has no way to derive these; the pivot table widget already has
+    // them client-side. Same source stock exportExcel() uses for its ROWCAPTIONS param.
+    url += '&ROWCAPTIONS=' + encodeURIComponent(table.getRowCaptions().join('\n'));
+
+    // The pivot's active filter selections (e.g. Product Category = Cereal+Dairy+...)
+    // for the Info sheet's recap block - same table.getFilterInfo() call stock
+    // exportExcel() uses for its FILTERNAMES/FILTERVALUES params.
+    var filterNames = [];
+    var filterValues = [];
+    table.getFilterInfo(filterNames, filterValues);
+    if (filterNames.length > 0) {
+        url += '&FILTERNAMES=' + encodeURIComponent(filterNames.join('\n'));
+        url += '&FILTERVALUES=' + encodeURIComponent(filterValues.join('\n'));
+    }
+
+    var fileBase;
+    if (title) {
+        fileBase = title;
+    }
+    else {
+        // Ad-hoc pivot built in the Analyzer and never saved - no name to hang a
+        // filename on. Fall back to the cube plus a short timestamp instead of a
+        // bare "export.xlsx" that every such download would collide on.
+        var now = new Date();
+        var pad = function(n) { return (n < 10 ? '0' : '') + n; };
+        var ts = now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + '-' + pad(now.getHours()) + pad(now.getMinutes());
+        fileBase = (table.cubeName ? table.cubeName : 'export') + '_' + ts;
+    }
+    url += '&FILENAME=' + encodeURIComponent(fileBase + '.' + pExtension);
+
+    return zenLink(url);
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="BIExport.UI.JSONPage">
+<Description><![CDATA[
+Plain CSP page (not a separate REST application) that serves the real JSON export,
+mirroring <class>BIExport.UI.XLSXPage</class>'s reasoning exactly: living in the SAME
+CSP application as the Analyzer page that links to it, so the browser's existing
+login session is reused automatically instead of hitting <class>BIExport.REST</class>'s
+separate session/cookie scope.]]></Description>
+<IncludeCode>%DeepSee</IncludeCode>
+<Super>%CSP.Page</Super>
+<TimeChanged>67795,64951.3675012</TimeChanged>
+<TimeCreated>67795,64951.3675012</TimeCreated>
+
+<Parameter name="CONTENTTYPE">
+<Default>application/json</Default>
+</Parameter>
+
+<Method name="OnPreHTTP">
+<Description>
+Sets the download filename header. Must happen here, not in OnPage() - by the time
+OnPage() runs, %CSP.Page has already flushed the HTTP header block (built from the
+CONTENTTYPE parameter above), so a %response.SetHeader() call in OnPage() is too
+late to take effect. Confirmed by checking how the stock %DeepSee.UI.MDXExcel page
+does exactly this same thing, in this exact same method, for the same reason.</Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Boolean</ReturnType>
+<Implementation><![CDATA[
+    Set tFileName = $Get(%request.Data("FILENAME",1), "export.json")
+    Do %response.SetHeader("Content-Disposition", "attachment; filename=""" _ tFileName _ """")
+    Quit 1
+]]></Implementation>
+</Method>
+
+<Method name="OnPage">
+<Description><![CDATA[
+Query parameters (same names/meaning as <class>BIExport.UI.XLSXPage</class>):
+  MDX or NONCE   - the query text, or a nonce created via CreateQueryNonce() for long MDX
+  TITLE, SUBTITLE, LISTINGNAME, TOTALS (1/0), FILENAME]]></Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    Set tSC = $$$OK
+    Try {
+        Set tNonce = $Get(%request.Data("NONCE",1))
+        If (tNonce '= "") {
+            Set tMDX = $Get($$$DeepSeeQueryNonceGLVN(tNonce))
+            Kill $$$DeepSeeQueryNonceGLVN(tNonce)
+        } Else {
+            Set tMDX = $Get(%request.Data("MDX",1))
+        }
+        If (tMDX = "") {
+            Set %response.Status = "400 Bad Request"
+            Quit
+        }
+
+        Set tOptions = {}
+        Set tOptions.title = $Get(%request.Data("TITLE",1))
+        Set tOptions.subtitle = $Get(%request.Data("SUBTITLE",1))
+        Set tOptions.cube = $Get(%request.Data("CUBE",1))
+        Set tOptions.listing = $Get(%request.Data("LISTINGNAME",1))
+        Set tOptions.totals = ($Get(%request.Data("TOTALS",1)) = "1")
+        Set tOptions.rowCaptions = $Get(%request.Data("ROWCAPTIONS",1))
+        Set tOptions.filters = ##class(BIExport.MDXExport).%ParseFilterPairs($Get(%request.Data("FILTERNAMES",1)), $Get(%request.Data("FILTERVALUES",1)))
+
+        Set tData = ##class(BIExport.MDXExport).BuildExportData(tMDX, tOptions)
+
+        Do tData.%ToJSON()
+    }
+    Catch ex {
+        Set %response.Status = "500 Internal Server Error"
+        Write ex.DisplayString()
+    }
+    Quit $$$OK
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="BIExport.UI.XLSXPage">
+<Description><![CDATA[
+Plain CSP page (not a separate REST application) that serves the real .xlsx export,
+deliberately mirroring how the stock <class>%DeepSee.UI.MDXExcel</class> page works:
+living in the SAME CSP application as the Analyzer page that links to it, so the
+browser's existing login session is reused automatically. A separate %CSP.REST
+application (see <class>BIExport.REST</class>) has its own session/cookie scope and
+would otherwise force a second login when called from inside an already-open
+Analyzer tab - this class exists specifically to avoid that.]]></Description>
+<IncludeCode>%DeepSee</IncludeCode>
+<Super>%CSP.Page</Super>
+<TimeChanged>67795,64951.4122832</TimeChanged>
+<TimeCreated>67795,64951.4122832</TimeCreated>
+
+<Parameter name="CONTENTTYPE">
+<Default>application/vnd.openxmlformats-officedocument.spreadsheetml.sheet</Default>
+</Parameter>
+
+<Method name="OnPreHTTP">
+<Description>
+Sets the download filename header. Must happen here, not in OnPage() - by the time
+OnPage() runs, %CSP.Page has already flushed the HTTP header block (built from the
+CONTENTTYPE parameter above), so a %response.SetHeader() call in OnPage() is too
+late to take effect (confirmed live: the header was silently absent from the actual
+response despite the OnPage() call "succeeding" - masked here because Chrome can't
+render a spreadsheet mimetype inline and downloads it regardless, unlike JSON).
+Mirrors how the stock %DeepSee.UI.MDXExcel page sets this exact header in this exact
+same method, for the same reason.</Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Boolean</ReturnType>
+<Implementation><![CDATA[
+    Set tFileName = $Get(%request.Data("FILENAME",1), "export.xlsx")
+    Do %response.SetHeader("Content-Disposition", "attachment; filename=""" _ tFileName _ """")
+    Quit 1
+]]></Implementation>
+</Method>
+
+<Method name="OnPage">
+<Description>
+Query parameters (same names/meaning as the stock MDXExcel page where they overlap):
+  MDX or NONCE   - the query text, or a nonce created via CreateQueryNonce() for long MDX
+  TITLE, SUBTITLE, LISTINGNAME, TOTALS (1/0), FILENAME</Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    Set tSC = $$$OK
+    Try {
+        Set tNonce = $Get(%request.Data("NONCE",1))
+        If (tNonce '= "") {
+            Set tMDX = $Get($$$DeepSeeQueryNonceGLVN(tNonce))
+            Kill $$$DeepSeeQueryNonceGLVN(tNonce)
+        } Else {
+            Set tMDX = $Get(%request.Data("MDX",1))
+        }
+        If (tMDX = "") {
+            Set %response.Status = "400 Bad Request"
+            Quit
+        }
+
+        Set tOptions = {}
+        Set tOptions.title = $Get(%request.Data("TITLE",1))
+        Set tOptions.subtitle = $Get(%request.Data("SUBTITLE",1))
+        Set tOptions.cube = $Get(%request.Data("CUBE",1))
+        Set tOptions.listing = $Get(%request.Data("LISTINGNAME",1))
+        Set tOptions.totals = ($Get(%request.Data("TOTALS",1)) = "1")
+        Set tOptions.rowCaptions = $Get(%request.Data("ROWCAPTIONS",1))
+        Set tOptions.filters = ##class(BIExport.MDXExport).%ParseFilterPairs($Get(%request.Data("FILTERNAMES",1)), $Get(%request.Data("FILTERVALUES",1)))
+
+        Set tData = ##class(BIExport.MDXExport).BuildExportData(tMDX, tOptions)
+        Set tBytes = ##class(BIExport.XLSXWriter).BuildXLSX(tData.%ToJSON())
+
+        Set tStream = ##class(%Stream.TmpBinary).%New()
+        Do tStream.Write(tBytes)
+        Do tStream.Rewind()
+        Do tStream.OutputToDevice()
+    }
+    Catch ex {
+        Set %response.Status = "500 Internal Server Error"
+        Write ex.DisplayString()
+    }
+    Quit $$$OK
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="BIExport.XLSXWriter">
+<Description><![CDATA[
+Renders the normalized JSON structure produced by <class>BIExport.MDXExport</class>
+into a genuine .xlsx workbook (real cell types and number formats - not an HTML
+table saved with an .xls extension).
+
+Layout: the data sheet is a real Excel structured Table (native autofilter/banded
+rows, sortable, recognized as a table by Excel/other tools) starting at A1 - the
+header row is never pushed down by metadata. Title/subtitle/filters instead go on
+a separate "Info" sheet, plus the workbook's own document properties.]]></Description>
+<Super>%RegisteredObject</Super>
+<TimeChanged>67795,64951.2405293</TimeChanged>
+<TimeCreated>67795,64951.2405293</TimeCreated>
+
+<Method name="BuildXLSX">
+<Description>
+pJSON is the %ToJSON() output of a BIExport.MDXExport.BuildExportData() result.
+Returns the raw bytes of an .xlsx file.</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pJSON:%String</FormalSpec>
+<Language>python</Language>
+<ReturnType>%Binary</ReturnType>
+<Implementation><![CDATA[
+import json
+import io
+import datetime
+import openpyxl
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.table import Table, TableStyleInfo
+
+data = json.loads(pJSON)
+
+wb = openpyxl.Workbook()
+ws = wb.active
+ws.title = "Export"
+
+HEADER_FONT = Font(bold=True)
+col_widths = {}
+
+def touch_width(col_idx, text):
+    length = len(str(text)) if text is not None else 0
+    if length > col_widths.get(col_idx, 0):
+        col_widths[col_idx] = length
+
+def write_header(row, col, text):
+    c = ws.cell(row=row, column=col, value=text)
+    c.font = HEADER_FONT
+    touch_width(col, text)
+    return c
+
+def apply_cell(r, c, cellobj):
+    cell = ws.cell(row=r, column=c)
+    if cellobj is None:
+        return cell
+    t = cellobj.get("t", "s")
+    v = cellobj.get("v")
+    fmt = cellobj.get("fmt")
+    if t == "n":
+        cell.value = v
+        if fmt:
+            cell.number_format = fmt
+    elif t == "d":
+        if v:
+            try:
+                cell.value = datetime.date.fromisoformat(v)
+            except ValueError:
+                cell.value = v
+            cell.number_format = fmt or "mm/dd/yyyy"
+        else:
+            cell.value = ""
+    elif t == "t":
+        cell.value = (v or 0) / 86400.0
+        cell.number_format = fmt or "[h]:mm:ss"
+    else:
+        cell.value = v
+        cell.number_format = "@"
+    touch_width(c, v)
+    return cell
+
+def finalize_table(min_col, max_col, last_row, table_name, headers):
+    """Wraps A1:.. through (min_col,max_col,last_row) as a real Excel Table. `headers`
+    is the list of already-written header strings for min_col..max_col, used verbatim
+    as the Table's column names (Excel requires these to match the header row cells)."""
+    ref = "%s1:%s%d" % (get_column_letter(min_col), get_column_letter(max_col), last_row)
+    tbl = Table(displayName=table_name, ref=ref)
+    tbl.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True, showColumnStripes=False)
+    tbl._initialise_columns()
+    for col, name in zip(tbl.tableColumns, headers):
+        col.name = str(name) if name else col.name
+    ws.add_table(tbl)
+    return tbl
+
+def safe_name(name, fallback):
+    return name if name else fallback
+
+# ---------------------------------------------------------------------------
+# Info sheet + document properties - title/subtitle/filters live here, never
+# inline on the data sheet, so the data sheet's header always starts at A1.
+# ---------------------------------------------------------------------------
+title = data.get("title") or ""
+subtitle = data.get("subtitle") or ""
+cube = data.get("cube") or ""
+filters = data.get("filters") or []
+
+info = wb.create_sheet("Info")
+r = 1
+if title:
+    c = info.cell(row=r, column=1, value="Report")
+    c.font = HEADER_FONT
+    info.cell(row=r, column=2, value=title)
+    r += 1
+if cube:
+    c = info.cell(row=r, column=1, value="Cube")
+    c.font = HEADER_FONT
+    info.cell(row=r, column=2, value=cube)
+    r += 1
+if subtitle:
+    c = info.cell(row=r, column=1, value="Subtitle")
+    c.font = HEADER_FONT
+    info.cell(row=r, column=2, value=subtitle)
+    r += 1
+for f in filters:
+    c = info.cell(row=r, column=1, value=f.get("name", ""))
+    c.font = HEADER_FONT
+    info.cell(row=r, column=2, value=f.get("value", ""))
+    r += 1
+if r == 1:
+    info.cell(row=r, column=1, value="(no title, cube, subtitle, or filters supplied for this export)")
+info.column_dimensions["A"].width = 24
+info.column_dimensions["B"].width = 50
+
+if title:
+    wb.properties.title = title
+if subtitle:
+    wb.properties.description = subtitle
+if cube:
+    wb.properties.subject = cube
+
+kind = data.get("kind", "cellset")
+
+if kind == "listing":
+    columns = data.get("columns", [])
+    rows = data.get("rows", [])
+    if not columns or not rows:
+        ws.cell(row=1, column=1, value="No results")
+    else:
+        headers = [safe_name(c.get("name", ""), "Column%d" % (j + 1)) for j, c in enumerate(columns)]
+        for j, h in enumerate(headers):
+            write_header(1, j + 1, h)
+        for i, data_row in enumerate(rows):
+            for j, val in enumerate(data_row):
+                ws.cell(row=2 + i, column=j + 1, value=val)
+                touch_width(j + 1, val)
+        last_row = 1 + len(rows)
+        finalize_table(1, len(headers), last_row, "ExportTable", headers)
+        ws.freeze_panes = "A2"
+else:
+    col_header_depth = data.get("colHeaderDepth", 0)
+    row_header_depth = data.get("rowHeaderDepth", 0)
+    col_count = data.get("colCount", 0)
+    row_count = data.get("rowCount", 0)
+    column_headers = data.get("columnHeaders", [])  # outer level first, inner (measure) last
+    row_headers = data.get("rowHeaders", [])
+    row_header_names = data.get("rowHeaderNames", [])
+    cells = data.get("cells", [])
+    column_totals = data.get("columnTotals")
+    row_totals = data.get("rowTotals")
+    grand_total = data.get("grandTotal")
+
+    if col_count == 0 or row_count == 0:
+        ws.cell(row=1, column=1, value="No results")
+    else:
+        has_row_totals = row_totals is not None
+        has_col_totals = column_totals is not None
+        total_col_count = col_count + (1 if has_row_totals else 0)
+        last_col = row_header_depth + total_col_count
+
+        # Header row (always row 1 - this is the whole point of the rewrite).
+        row_headers_text = []
+        for k in range(row_header_depth):
+            name = row_header_names[k] if k < len(row_header_names) else ""
+            name = safe_name(name, "Row %d" % (k + 1))
+            row_headers_text.append(name)
+            write_header(1, k + 1, name)
+
+        col_headers_text = []
+        for j in range(col_count):
+            if col_header_depth <= 1:
+                label = column_headers[0][j] if column_headers else ""
+            else:
+                label = " / ".join(column_headers[lvl][j] for lvl in range(col_header_depth))
+            col_headers_text.append(label)
+            write_header(1, row_header_depth + 1 + j, label)
+
+        if has_row_totals:
+            write_header(1, row_header_depth + 1 + col_count, "Total")
+
+        # Data rows.
+        for i in range(row_count):
+            r = 2 + i
+            hdrs = row_headers[i] if i < len(row_headers) else []
+            for k, label in enumerate(hdrs):
+                ws.cell(row=r, column=k + 1, value=label)
+                touch_width(k + 1, label)
+            row_cells = cells[i] if i < len(cells) else []
+            for j, cellobj in enumerate(row_cells):
+                apply_cell(r, row_header_depth + 1 + j, cellobj)
+            if has_row_totals:
+                apply_cell(r, row_header_depth + 1 + col_count, row_totals[i])
+
+        last_data_row = 1 + row_count
+
+        totals_row_num = None
+        if has_col_totals:
+            totals_row_num = last_data_row + 1
+            # Matches the legacy exporter's convention: the "Total" label sits under
+            # the last row-header column, the others in that row stay blank.
+            if row_header_depth > 0:
+                ws.cell(row=totals_row_num, column=row_header_depth, value="Total")
+            for j, cellobj in enumerate(column_totals):
+                apply_cell(totals_row_num, row_header_depth + 1 + j, cellobj)
+            if has_row_totals and grand_total is not None:
+                apply_cell(totals_row_num, row_header_depth + 1 + col_count, grand_total)
+
+        last_row = totals_row_num if totals_row_num else last_data_row
+        all_headers = row_headers_text + col_headers_text + (["Total"] if has_row_totals else [])
+        tbl = finalize_table(1, last_col, last_row, "ExportTable", all_headers)
+
+        if totals_row_num:
+            tbl.totalsRowShown = True
+            tbl.totalsRowCount = 1
+            if row_header_depth > 0:
+                tbl.tableColumns[row_header_depth - 1].totalsRowLabel = "Total"
+            for j in range(col_count):
+                tbl.tableColumns[row_header_depth + j].totalsRowFunction = "sum"
+            if has_row_totals:
+                tbl.tableColumns[row_header_depth + col_count].totalsRowFunction = "sum"
+            for c in range(1, last_col + 1):
+                ws.cell(row=totals_row_num, column=c).font = HEADER_FONT
+
+        ws.freeze_panes = "A2"
+
+for idx, width in col_widths.items():
+    ws.column_dimensions[get_column_letter(idx)].width = min(max(width + 2, 8), 60)
+
+buf = io.BytesIO()
+wb.save(buf)
+return buf.getvalue()
+]]></Implementation>
+</Method>
+</Class>
+</Export>
