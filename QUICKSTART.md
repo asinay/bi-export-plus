@@ -35,7 +35,7 @@ classes file, [dist/BIExport-classes.xml](dist/BIExport-classes.xml), from an
 IRIS terminal in your target namespace:
 
 ```objectscript
-Do $system.OBJ.Load("C:\AI_Apps\bi-export-plus\dist\BIExport-classes.xml", "ck")
+Do $system.OBJ.Load("/path/to/bi-export-plus/dist/BIExport-classes.xml", "ck")
 ```
 
 (No web application gets created this way, but none is needed for the

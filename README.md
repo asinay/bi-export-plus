@@ -55,7 +55,7 @@ Point this at the **directory that contains `module.xml`**, not at the
 `module.xml` file itself - e.g. on Windows:
 
 ```
-zpm:USER>load C:\AI_Apps\bi-export-plus
+zpm:USER>load C:\path\to\bi-export-plus
 ```
 
 IPM reads [module.xml](module.xml), loads the classes under [src/](src), and
@@ -104,7 +104,7 @@ Either drag-and-drop it onto **Management Portal > System Explorer >
 Classes > Import**, or from an IRIS terminal in your target namespace:
 
 ```objectscript
-Do $system.OBJ.Load("C:\AI_Apps\bi-export-plus\dist\BIExport-classes.xml", "ck")
+Do $system.OBJ.Load("/path/to/bi-export-plus/dist/BIExport-classes.xml", "ck")
 ```
 
 This does **not** create the `/csp/bi-export` web application - it's just the
@@ -125,6 +125,24 @@ Open your pivots via `BIExport.UI.Analyzer.cls` instead of the stock
 
 The page's Export dropdown gains **Excel Workbook** and **JSON** entries next
 to the stock Excel/CSV ones.
+
+#### Add a Favorites bookmark instead
+
+Rather than changing an existing link/shortcut's URL, add a normal Portal
+**Favorite** that opens a saved pivot through `BIExport.UI.Analyzer.cls`
+directly - it shows up in the User Portal's Favorites sidebar/cover shelf
+like any other bookmark:
+
+```objectscript
+Do ##class(BIExport.Favorites).AddAnalyzerFavorite("<folder>/<pivot name>.pivot")
+```
+
+The one required argument is the pivot's full library path (`fullName` in
+the Portal's pivot list). Optional second/third arguments choose the
+bookmark's folder (default `"BIExport"`) and display title (defaults to the
+pivot's own name). Run once per pivot, per user - Favorites are personal to
+each user, there's no bulk/all-users mode. `RemoveAnalyzerFavorite(pFolderName,
+pTitle)` undoes it.
 
 ### Option B: Standalone REST API
 
@@ -156,6 +174,20 @@ Supported request body fields:
 | `rowCaptions` | no | Row axis dimension captions (outermost first), for the row-header columns |
 
 See sample output in [samples/](samples).
+
+## Known limitations
+
+- **Totals across mixed measures.** If a row/column axis mixes different
+  measures (e.g. "Amount Sold" and "Units Sold" side by side), `totals: true`
+  sums across them regardless of measure, mixing dollars and units - this
+  matches the stock Analyzer's own CSV/Excel exports, which call the same
+  underlying IRIS API. Totals are only meaningful when an axis is entirely
+  one measure.
+- **Nested column headers aren't Excel Tables.** A pivot with a dimension on
+  Columns (e.g. Channel x measure) needs a true 2+ row merged header, which
+  Excel's Table feature can't have (exactly one header row allowed) - that
+  export keeps the merged header and skips the Table (no autofilter/banded
+  rows), with a note on the Info sheet explaining why.
 
 ## License
 
