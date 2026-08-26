@@ -119,6 +119,7 @@ for f in filters:
     r += 1
 if r == 1:
     info.cell(row=r, column=1, value="(no title, cube, subtitle, or filters supplied for this export)")
+info_next_row = r
 info.column_dimensions["A"].width = 24
 info.column_dimensions["B"].width = 50
 
@@ -162,6 +163,83 @@ else:
 
     if col_count == 0 or row_count == 0:
         ws.cell(row=1, column=1, value="No results")
+    elif col_header_depth > 1:
+        # A dimension on Columns needs a true 2+ row merged header - Excel's structured
+        # Table feature requires exactly one header row, so this shape can't also be a
+        # Table (see the "Nested column headers" tradeoff in README.md). Rather than
+        # flatten the levels into one row (losing the visual grouping) to force a Table,
+        # this branch keeps the real merged header and gives up the Table instead:
+        # native autofilter/banded rows/tool-recognition, in exchange for an accurate
+        # visual structure. Row-header column titles span every header row (merged
+        # vertically); each column-header level gets its own row, merged horizontally
+        # across runs of columns that share the same value at that level and every
+        # shallower level (so a run never straddles an outer group's boundary).
+        has_row_totals = row_totals is not None
+        has_col_totals = column_totals is not None
+        last_col = row_header_depth + col_count + (1 if has_row_totals else 0)
+        header_rows = col_header_depth
+        first_data_row = header_rows + 1
+
+        for k in range(row_header_depth):
+            name = row_header_names[k] if k < len(row_header_names) else ""
+            write_header(1, k + 1, safe_name(name, "Row %d" % (k + 1)))
+            ws.merge_cells(start_row=1, start_column=k + 1, end_row=header_rows, end_column=k + 1)
+
+        def levels_match(a, b, upto):
+            return all(column_headers[lv][a] == column_headers[lv][b] for lv in range(upto + 1))
+
+        for lvl in range(col_header_depth):
+            row = lvl + 1
+            mergeable = lvl < col_header_depth - 1
+            j = 0
+            while j < col_count:
+                k = j
+                if mergeable:
+                    while k + 1 < col_count and levels_match(j, k + 1, lvl):
+                        k += 1
+                col = row_header_depth + 1 + j
+                write_header(row, col, column_headers[lvl][j])
+                if k > j:
+                    ws.merge_cells(start_row=row, start_column=col, end_row=row, end_column=row_header_depth + 1 + k)
+                j = k + 1
+
+        if has_row_totals:
+            write_header(1, row_header_depth + 1 + col_count, "Total")
+            ws.merge_cells(start_row=1, start_column=row_header_depth + 1 + col_count,
+                            end_row=header_rows, end_column=row_header_depth + 1 + col_count)
+
+        # Data rows.
+        for i in range(row_count):
+            r = first_data_row + i
+            hdrs = row_headers[i] if i < len(row_headers) else []
+            for k, label in enumerate(hdrs):
+                ws.cell(row=r, column=k + 1, value=label)
+                touch_width(k + 1, label)
+            row_cells = cells[i] if i < len(cells) else []
+            for j, cellobj in enumerate(row_cells):
+                apply_cell(r, row_header_depth + 1 + j, cellobj)
+            if has_row_totals:
+                apply_cell(r, row_header_depth + 1 + col_count, row_totals[i])
+
+        last_data_row = first_data_row - 1 + row_count
+
+        if has_col_totals:
+            totals_row_num = last_data_row + 1
+            if row_header_depth > 0:
+                ws.cell(row=totals_row_num, column=row_header_depth, value="Total")
+            for j, cellobj in enumerate(column_totals):
+                apply_cell(totals_row_num, row_header_depth + 1 + j, cellobj)
+            if has_row_totals and grand_total is not None:
+                apply_cell(totals_row_num, row_header_depth + 1 + col_count, grand_total)
+            for c in range(1, last_col + 1):
+                ws.cell(row=totals_row_num, column=c).font = HEADER_FONT
+
+        ws.freeze_panes = "%s%d" % (get_column_letter(row_header_depth + 1), first_data_row)
+
+        info.cell(row=info_next_row, column=1,
+                   value="Note: this pivot has a dimension on Columns (multi-level column "
+                         "header), so this sheet keeps a true merged header instead of a "
+                         "flattened Excel Table - no autofilter/banded rows on this export.")
     else:
         has_row_totals = row_totals is not None
         has_col_totals = column_totals is not None
@@ -178,10 +256,7 @@ else:
 
         col_headers_text = []
         for j in range(col_count):
-            if col_header_depth <= 1:
-                label = column_headers[0][j] if column_headers else ""
-            else:
-                label = " / ".join(column_headers[lvl][j] for lvl in range(col_header_depth))
+            label = column_headers[0][j] if column_headers else ""
             col_headers_text.append(label)
             write_header(1, row_header_depth + 1 + j, label)
 

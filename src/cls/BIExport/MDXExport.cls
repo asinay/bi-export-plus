@@ -214,11 +214,15 @@ ClassMethod %BuildCellset(pRS As %DeepSee.ResultSet, pResult As %DynamicObject, 
     Set tHasOverride = pRS.%HasCellFormatOverride()
 
     // Column headers, outermost (depth tColHeaderDepth) first, innermost (1) last - top-to-bottom.
+    // Pushed with explicit type "string" - member captions that happen to look numeric
+    // (e.g. a Year value "2024", or a flag member "0"/"1") would otherwise get
+    // auto-detected as JSON numbers, producing a mixed string/number array that crashes
+    // XLSXWriter's header-flattening join for any pivot with a ragged/asymmetric column axis.
     Set tColumnHeaders = []
     For lvl=tColHeaderDepth:-1:1 {
         Set tRowOfHeaders = []
         For c=1:1:tColCount {
-            Do tRowOfHeaders.%Push($Get(tColLabel(c,lvl)))
+            Do tRowOfHeaders.%Push($Get(tColLabel(c,lvl)),"string")
         }
         Do tColumnHeaders.%Push(tRowOfHeaders)
     }
@@ -229,7 +233,7 @@ ClassMethod %BuildCellset(pRS As %DeepSee.ResultSet, pResult As %DynamicObject, 
     For r=1:1:tRowCount {
         Set tHeaderRow = []
         For lvl=tRowHeaderDepth:-1:1 {
-            Do tHeaderRow.%Push($Get(tRowLabel(r,lvl)))
+            Do tHeaderRow.%Push($Get(tRowLabel(r,lvl)),"string")
         }
         Do tRowHeaders.%Push(tHeaderRow)
     }
