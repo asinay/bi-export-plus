@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Export generator="IRIS" version="26" zv="IRIS for Windows (x86-64) 2026.1 (Build 234U)" ts="2026-08-26 22:55:29">
+<Export generator="IRIS" version="26" zv="IRIS for Windows (x86-64) 2026.1 (Build 234U)" ts="2026-09-01 15:31:37">
 <Class name="BIExport.Favorites">
 <Description><![CDATA[
 Adds a "Favorite" bookmark in the IRIS BI User Portal (the same Favorites list
@@ -704,8 +704,19 @@ name instead of the "_DeepSee.UI.Analyzer.zen" alias, e.g.
 /csp/<namespace>/BIExport.UI.Analyzer.cls?CUBE=... - point any links/shortcuts at
 this URL instead of the stock one to pick up the new options.]]></Description>
 <Super>%DeepSee.UI.Analyzer</Super>
-<TimeChanged>67795,64951.3229184</TimeChanged>
+<TimeChanged>67814,55652.936676</TimeChanged>
 <TimeCreated>67795,64951.3229184</TimeCreated>
+
+<Parameter name="ANALYZERURL">
+<Description><![CDATA[
+The stock page hardcodes this to "_DeepSee.UI.Analyzer.zen", which seeds the
+client-side <var>analyzerURL</var> property that every navigation action (open
+pivot from the tree, the "Open" popup, Save-As, cube/SubjectArea change, New
+Pivot, Restore Pivot) uses to build its redirect URL. Left unoverridden, every
+one of those actions bounces back to the stock Analyzer page instead of staying
+on this subclass. Override with this class's own URL so navigation stays here.]]></Description>
+<Default>BIExport.UI.Analyzer.cls</Default>
+</Parameter>
 
 <Method name="onloadHandler">
 <Description>

@@ -10,6 +10,14 @@
 Class BIExport.UI.Analyzer Extends %DeepSee.UI.Analyzer
 {
 
+/// The stock page hardcodes this to "_DeepSee.UI.Analyzer.zen", which seeds the
+/// client-side <var>analyzerURL</var> property that every navigation action (open
+/// pivot from the tree, the "Open" popup, Save-As, cube/SubjectArea change, New
+/// Pivot, Restore Pivot) uses to build its redirect URL. Left unoverridden, every
+/// one of those actions bounces back to the stock Analyzer page instead of staying
+/// on this subclass. Override with this class's own URL so navigation stays here.
+Parameter ANALYZERURL = "BIExport.UI.Analyzer.cls";
+
 /// Runs after the stock page finishes its own load logic; DOM-patches the existing
 /// Export dropdown to add "Excel Workbook" and "JSON" items. Implemented as a DOM
 /// patch (rather than duplicating the dropdown-building code) so it keeps working
