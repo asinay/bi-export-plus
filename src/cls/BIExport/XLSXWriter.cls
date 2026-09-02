@@ -17,7 +17,7 @@ import json
 import io
 import datetime
 import openpyxl
-from openpyxl.styles import Font
+from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
@@ -28,6 +28,10 @@ ws = wb.active
 ws.title = "Export"
 
 HEADER_FONT = Font(bold=True)
+INFO_TITLE_FONT = Font(bold=True, size=14, color="FFFFFF")
+INFO_TITLE_FILL = PatternFill("solid", fgColor="4472C4")
+INFO_LABEL_FILL = PatternFill("solid", fgColor="D9E1F2")
+INFO_NOTE_FONT = Font(italic=True, color="808080")
 col_widths = {}
 
 def touch_width(col_idx, text):
@@ -96,29 +100,42 @@ cube = data.get("cube") or ""
 filters = data.get("filters") or []
 
 info = wb.create_sheet("Info")
-r = 1
-if title:
-    c = info.cell(row=r, column=1, value="Report")
+info.sheet_view.showGridLines = False
+
+info.cell(row=1, column=1, value="Export Info")
+info.cell(row=1, column=2, value="")
+info.merge_cells(start_row=1, start_column=1, end_row=1, end_column=2)
+for col in (1, 2):
+    c = info.cell(row=1, column=col)
+    c.font = INFO_TITLE_FONT
+    c.fill = INFO_TITLE_FILL
+info.row_dimensions[1].height = 22
+
+def info_label(row, text):
+    c = info.cell(row=row, column=1, value=text)
     c.font = HEADER_FONT
+    c.fill = INFO_LABEL_FILL
+
+r = 3
+if title:
+    info_label(r, "Report")
     info.cell(row=r, column=2, value=title)
     r += 1
 if cube:
-    c = info.cell(row=r, column=1, value="Cube")
-    c.font = HEADER_FONT
+    info_label(r, "Cube")
     info.cell(row=r, column=2, value=cube)
     r += 1
 if subtitle:
-    c = info.cell(row=r, column=1, value="Subtitle")
-    c.font = HEADER_FONT
+    info_label(r, "Subtitle")
     info.cell(row=r, column=2, value=subtitle)
     r += 1
 for f in filters:
-    c = info.cell(row=r, column=1, value=f.get("name", ""))
-    c.font = HEADER_FONT
+    info_label(r, f.get("name", ""))
     info.cell(row=r, column=2, value=f.get("value", ""))
     r += 1
-if r == 1:
-    info.cell(row=r, column=1, value="(no title, cube, subtitle, or filters supplied for this export)")
+if r == 3:
+    c = info.cell(row=r, column=1, value="(no title, cube, subtitle, or filters supplied for this export)")
+    c.font = INFO_NOTE_FONT
 info_next_row = r
 info.column_dimensions["A"].width = 24
 info.column_dimensions["B"].width = 50
@@ -245,10 +262,11 @@ else:
 
         ws.freeze_panes = "%s%d" % (get_column_letter(row_header_depth + 1), first_data_row)
 
-        info.cell(row=info_next_row, column=1,
+        note_cell = info.cell(row=info_next_row, column=1,
                    value="Note: this pivot has a dimension on Columns (multi-level column "
                          "header), so this sheet keeps a true merged header instead of a "
                          "flattened Excel Table - no autofilter/banded rows on this export.")
+        note_cell.font = INFO_NOTE_FONT
     else:
         has_row_totals = row_totals is not None
         has_col_totals = column_totals is not None
@@ -319,6 +337,18 @@ else:
 
 for idx, width in col_widths.items():
     ws.column_dimensions[get_column_letter(idx)].width = min(max(width + 2, 8), 60)
+
+# Branding footer on the Info sheet - computed from info.max_row rather than a
+# manually-tracked counter, since earlier branches write a variable, optional
+# number of rows there (title/cube/subtitle/filters, plus the nested-column-
+# header note) and none of them update a shared "next free row" after writing.
+BRAND_LINK = "https://github.com/asinay/bi-export-plus"
+brand_row = info.max_row + 2
+brand_cell = info.cell(row=brand_row, column=1, value="Generated with bi-export-plus")
+brand_cell.font = INFO_NOTE_FONT
+link_cell = info.cell(row=brand_row + 1, column=1, value=BRAND_LINK)
+link_cell.hyperlink = BRAND_LINK
+link_cell.font = Font(color="0563C1", underline="single")
 
 buf = io.BytesIO()
 wb.save(buf)
