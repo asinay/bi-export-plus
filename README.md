@@ -12,6 +12,24 @@ Analyzer — no more opening "Export to Excel" and getting an HTML table wearing
 **New here?** → **[Try it in 2 minutes](QUICKSTART.md)**. Everything below is the
 full reference: every install option, every request field, every limitation.
 
+<p align="center">
+  <img src="screenshots/export-dropdown.png" alt="Excel Workbook and JSON in the Analyzer's Export dropdown" width="480">
+</p>
+<p align="center"><em>The new buttons, right next to the stock Excel/CSV ones.</em></p>
+
+<table>
+<tr>
+<td width="50%" valign="top" align="center">
+<img src="screenshots/export-sheet.png" alt="Real Excel Table with autofilter and a Totals row" width="420"><br>
+<em>A genuine Excel Table - autofilter, sortable headers, a native Totals row.</em>
+</td>
+<td width="50%" valign="top" align="center">
+<img src="screenshots/info-sheet.png" alt="Styled Info sheet with report metadata" width="420"><br>
+<em>An Info sheet with title/cube/filters, not squeezed above the data.</em>
+</td>
+</tr>
+</table>
+
 ## Requirements
 
 - InterSystems IRIS with **Embedded Python** enabled.
@@ -132,6 +150,10 @@ real `.xlsx`/`.json` download, using the exact same code path as the buttons bel
 /csp/<namespace>/BIExport.UI.DemoPage.cls
 ```
 
+<p align="center">
+  <img src="screenshots/demo-page.png" alt="Standalone demo page with sample queries and totals toggles" width="600">
+</p>
+
 ### Option A: In-Analyzer export buttons
 
 Open your pivots via `BIExport.UI.Analyzer.cls` instead of the stock
@@ -171,7 +193,7 @@ pTitle)` undoes it.
 
 ```bash
 curl -u _system:PASSWORD -X POST \
-  http://localhost:52773/csp/bi-export/xlsx \
+  http://host:port/csp/bi-export/xlsx \
   -H "Content-Type: application/json" \
   -d '{
     "mdx": "SELECT [Measures].[Amount] ON 0 FROM [HoleFoods Sales]",
@@ -196,6 +218,11 @@ Supported request body fields:
 | `columnTotalAgg` | no | Aggregation for `columnTotals`, same values as `rowTotalAgg` |
 | `filters` | no | `[{"name": "...", "value": "..."}]` recap block on the Info sheet |
 | `rowCaptions` | no | Row axis dimension captions (outermost first), for the row-header columns |
+
+<p align="center">
+  <img src="screenshots/pivot-options-totals.png" alt="Pivot Options dialog's Summary aggregation dropdown" width="420">
+</p>
+<p align="center"><em><code>rowTotalAgg</code>/<code>columnTotalAgg</code> take the same values as this dropdown - no translation needed.</em></p>
 
 See sample output in [samples/](samples).
 
