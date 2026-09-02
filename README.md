@@ -1,12 +1,16 @@
 # bi-export-plus
 
 Real, binary `.xlsx` (and typed JSON) exports for the InterSystems IRIS BI/DeepSee
-Analyzer, replacing the legacy HTML-saved-as-`.xls` "Export to Excel" behavior.
+Analyzer — no more opening "Export to Excel" and getting an HTML table wearing an
+`.xls` extension.
 
-- Adds **Excel Workbook** and **JSON** items to the Analyzer's own Export dropdown
-  (alongside the stock Excel/CSV options).
-- Adds a standalone REST API (`/csp/bi-export/xlsx`, `/csp/bi-export/json`) so
-  external tools/scripts can pull the same exports without opening the Analyzer.
+- **Excel Workbook** and **JSON** buttons appear right in the Analyzer's own Export
+  dropdown, next to the stock Excel/CSV options.
+- A standalone REST API (`/csp/bi-export/xlsx`, `/csp/bi-export/json`) too, for
+  pulling the same exports from scripts/automation without opening the Analyzer.
+
+**New here?** → **[Try it in 2 minutes](QUICKSTART.md)**. Everything below is the
+full reference: every install option, every request field, every limitation.
 
 ## Requirements
 
@@ -32,9 +36,8 @@ the xlsx export will fail at runtime otherwise.
 
 ## Installation
 
-### Option A: InterSystems Package Manager (IPM/ZPM)
-
-If this module has been published to the IPM registry:
+**Recommended: InterSystems Package Manager (IPM/ZPM).** If this module has been
+published to the IPM registry:
 
 ```objectscript
 zpm "install bi-export-plus"
@@ -62,6 +65,9 @@ IPM reads [module.xml](module.xml), loads the classes under [src/](src), and
 registers the `/csp/bi-export` web application for you. Take note of the
 `AfterInstallMessage` it prints at the end - it points you at the two usage
 options below.
+
+<details>
+<summary><strong>Other ways to install</strong> (no IPM, or just the packaged classes XML)</summary>
 
 ### Option B: Manual install (no IPM)
 
@@ -112,6 +118,8 @@ classes. That's enough for the in-Analyzer export buttons (Option A under
 "Usage" below), but if you also want the standalone REST API, create the web
 application manually per step 2 of Option B above.
 
+</details>
+
 ## Usage
 
 ### Option A: In-Analyzer export buttons
@@ -126,7 +134,8 @@ Open your pivots via `BIExport.UI.Analyzer.cls` instead of the stock
 The page's Export dropdown gains **Excel Workbook** and **JSON** entries next
 to the stock Excel/CSV ones.
 
-#### Add a Favorites bookmark instead
+<details>
+<summary>Add a Favorites bookmark instead of changing a link's URL</summary>
 
 Rather than changing an existing link/shortcut's URL, add a normal Portal
 **Favorite** that opens a saved pivot through `BIExport.UI.Analyzer.cls`
@@ -143,6 +152,8 @@ bookmark's folder (default `"BIExport"`) and display title (defaults to the
 pivot's own name). Run once per pivot, per user - Favorites are personal to
 each user, there's no bulk/all-users mode. `RemoveAnalyzerFavorite(pFolderName,
 pTitle)` undoes it.
+
+</details>
 
 ### Option B: Standalone REST API
 
@@ -169,7 +180,10 @@ Supported request body fields:
 | `title`, `subtitle` | no | Shown on the Info sheet |
 | `cube` | no | Shown on the Info sheet, used in the default filename |
 | `listing` | no | Listing name, for drillthrough/listing MDX |
-| `totals` | no | `true` to include row/column totals |
+| `rowTotals` | no | `true` to include a "Total" column (one value per row, summed across columns). Independent of `columnTotals` — a pivot can have either, both, or neither. |
+| `columnTotals` | no | `true` to include a "Total" row (one value per column, summed down rows). Independent of `rowTotals`. |
+| `rowTotalAgg` | no | Aggregation for `rowTotals` — `"sum"` (default), `"count"`, `"min"`, `"max"`, `"avg"`, `"pct"` (% of total) |
+| `columnTotalAgg` | no | Aggregation for `columnTotals`, same values as `rowTotalAgg` |
 | `filters` | no | `[{"name": "...", "value": "..."}]` recap block on the Info sheet |
 | `rowCaptions` | no | Row axis dimension captions (outermost first), for the row-header columns |
 
@@ -178,11 +192,11 @@ See sample output in [samples/](samples).
 ## Known limitations
 
 - **Totals across mixed measures.** If a row/column axis mixes different
-  measures (e.g. "Amount Sold" and "Units Sold" side by side), `totals: true`
-  sums across them regardless of measure, mixing dollars and units - this
-  matches the stock Analyzer's own CSV/Excel exports, which call the same
-  underlying IRIS API. Totals are only meaningful when an axis is entirely
-  one measure.
+  measures (e.g. "Amount Sold" and "Units Sold" side by side), `rowTotals`/
+  `columnTotals` aggregate across them regardless of measure, mixing dollars
+  and units - this matches the stock Analyzer's own CSV/Excel exports, which
+  call the same underlying IRIS API. Totals are only meaningful when an axis
+  is entirely one measure.
 - **Nested column headers aren't Excel Tables.** A pivot with a dimension on
   Columns (e.g. Channel x measure) needs a true 2+ row merged header, which
   Excel's Table feature can't have (exactly one header row allowed) - that

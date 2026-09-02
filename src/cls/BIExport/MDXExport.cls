@@ -13,7 +13,22 @@ Class BIExport.MDXExport Extends %RegisteredObject
 ///                            when title is blank (e.g. an ad-hoc pivot that was never
 ///                            saved, so has no name to show)
 ///   listing               - %String, listing name to use if the MDX is a drillthrough/listing query
-///   totals                - %Boolean, include row/column totals (default false)
+///   rowTotals             - %Boolean, include a "Total" column (one value per row, summed
+///                            across columns) - default false. Independent of columnTotals;
+///                            a pivot can have either, both, or neither turned on, and this
+///                            must mirror that exactly rather than OR-ing them into one flag
+///                            (doing so was a bug - see BIExport.UI.Analyzer's buildExportURL()).
+///   columnTotals          - %Boolean, include a "Total" row (one value per column, summed
+///                            down rows) - default false. Independent of rowTotals.
+///   rowTotalAgg           - %String, aggregation function for rowTotals - one of "sum"
+///                            (default), "count", "min", "max", "avg", "pct" (% of total).
+///                            Passed straight through to %DeepSee.ResultSet's %GetRowTotal -
+///                            these are exactly the values its pAgg parameter accepts, and
+///                            also exactly the <option value="..."> values in the Pivot
+///                            Options dialog's Summary aggregation dropdown, so no translation
+///                            is needed at either end.
+///   columnTotalAgg        - %String, aggregation function for columnTotals - same values
+///                            as rowTotalAgg, passed to %GetColumnTotal.
 ///   filters               - array of {name, value} objects, printed as a recap block
 ///   rowCaptions            - the row axis's dimension/level captions (e.g. "YearSold",
 ///                            "Product Category"), outermost first. The ResultSet API has
@@ -56,8 +71,11 @@ ClassMethod BuildExportData(pMDX As %String, pOptions As %DynamicObject = "") As
         Do ..%BuildListing(tRS, tResult)
     } Else {
         Set tResult.kind = "cellset"
-        Set tTotals = $Select($IsObject(pOptions):(pOptions.totals=1),1:0)
-        Do ..%BuildCellset(tRS, tResult, tTotals)
+        Set tRowTotals = $Select($IsObject(pOptions):(pOptions.rowTotals=1),1:0)
+        Set tColTotals = $Select($IsObject(pOptions):(pOptions.columnTotals=1),1:0)
+        Set tRowTotalAgg = $Select($IsObject(pOptions)&&(pOptions.%Get("rowTotalAgg","")'=""):pOptions.rowTotalAgg,1:"sum")
+        Set tColTotalAgg = $Select($IsObject(pOptions)&&(pOptions.%Get("columnTotalAgg","")'=""):pOptions.columnTotalAgg,1:"sum")
+        Do ..%BuildCellset(tRS, tResult, tRowTotals, tColTotals, tRowTotalAgg, tColTotalAgg)
 
         Set tRowHeaderNames = []
         For n=1:1:tResult.rowHeaderDepth {
@@ -144,7 +162,8 @@ ClassMethod %BuildListing(pRS As %DeepSee.ResultSet, pResult As %DynamicObject) 
 }
 
 /// Flattens an MDX cellset into headers + typed data cells (+ optional totals).
-ClassMethod %BuildCellset(pRS As %DeepSee.ResultSet, pResult As %DynamicObject, pTotals As %Boolean) [ Private ]
+/// pRowTotals and pColTotals are independent - see BuildExportData's doc comment.
+ClassMethod %BuildCellset(pRS As %DeepSee.ResultSet, pResult As %DynamicObject, pRowTotals As %Boolean, pColTotals As %Boolean, pRowTotalAgg As %String = "sum", pColTotalAgg As %String = "sum") [ Private ]
 {
     Set tAxisCount = pRS.%GetAxisCount()
 
@@ -267,26 +286,38 @@ ClassMethod %BuildCellset(pRS As %DeepSee.ResultSet, pResult As %DynamicObject, 
     }
     Set pResult.cells = tData
 
-    If ('pTotals) Quit
+    If ('pRowTotals) && ('pColTotals) Quit
 
-    // Column totals (one value per column, summed down the rows) + row totals (one per row) + grand total.
-    Set tColTotals = []
-    For c=1:1:tColCount {
-        Set tFormat = $Select($Get(tColFormat(c))'="":tColFormat(c),1:tDefaultFormat)
-        Do tColTotals.%Push(..%MakeCell(pRS.%GetColumnTotal(c),tFormat))
+    // Column totals: one value per column, summed down the rows - rendered as a "Total" row.
+    // "pct" (% of Total) returns a raw 0-1 fraction, not a value in the column's own
+    // units, so it needs its own percent format rather than the column's normal one.
+    If (pColTotals) {
+        Set tColTotals = []
+        Set tColPct = (pColTotalAgg="pct")
+        For c=1:1:tColCount {
+            Set tFormat = $Select(tColPct:"0.00%",$Get(tColFormat(c))'="":tColFormat(c),1:tDefaultFormat)
+            Do tColTotals.%Push(..%MakeCell(pRS.%GetColumnTotal(c,pColTotalAgg),tFormat))
+        }
+        Set pResult.columnTotals = tColTotals
+        Set pResult.columnTotalAgg = pColTotalAgg
     }
-    Set pResult.columnTotals = tColTotals
 
-    Set tRowTotals = []
-    Set tGrandTotal = 0
-    For r=1:1:tRowCount {
-        Set tFormat = $Select($Get(tRowFormat(r))'="":tRowFormat(r),1:tDefaultFormat)
-        Set tSum = pRS.%GetRowTotal(r)
-        Set tGrandTotal = tGrandTotal + tSum
-        Do tRowTotals.%Push(..%MakeCell(tSum,tFormat))
+    // Row totals: one value per row, summed across columns - rendered as a "Total" column.
+    // Grand total is only meaningful (and only used by the writer) alongside row totals.
+    If (pRowTotals) {
+        Set tRowTotals = []
+        Set tGrandTotal = 0
+        Set tRowPct = (pRowTotalAgg="pct")
+        For r=1:1:tRowCount {
+            Set tFormat = $Select(tRowPct:"0.00%",$Get(tRowFormat(r))'="":tRowFormat(r),1:tDefaultFormat)
+            Set tSum = pRS.%GetRowTotal(r,pRowTotalAgg)
+            Set tGrandTotal = tGrandTotal + tSum
+            Do tRowTotals.%Push(..%MakeCell(tSum,tFormat))
+        }
+        Set pResult.rowTotals = tRowTotals
+        Set pResult.rowTotalAgg = pRowTotalAgg
+        Set pResult.grandTotal = ..%MakeCell(tGrandTotal,$Select(tRowPct:"0.00%",1:tDefaultFormat))
     }
-    Set pResult.rowTotals = tRowTotals
-    Set pResult.grandTotal = ..%MakeCell(tGrandTotal,tDefaultFormat)
 }
 
 /// Builds a typed cell object {t, v, fmt} from a raw MDX cell value + MDX format string.

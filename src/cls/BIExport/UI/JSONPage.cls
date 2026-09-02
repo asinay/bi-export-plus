@@ -24,7 +24,8 @@ ClassMethod OnPreHTTP() As %Boolean
 
 /// Query parameters (same names/meaning as <class>BIExport.UI.XLSXPage</class>):
 ///   MDX or NONCE   - the query text, or a nonce created via CreateQueryNonce() for long MDX
-///   TITLE, SUBTITLE, LISTINGNAME, TOTALS (1/0), FILENAME
+///   TITLE, SUBTITLE, LISTINGNAME, ROWTOTALS (1/0), COLUMNTOTALS (1/0),
+///   ROWTOTALAGG, COLUMNTOTALAGG ("sum"/"count"/"min"/"max"/"avg"/"pct"), FILENAME
 ClassMethod OnPage() As %Status
 {
     Set tSC = $$$OK
@@ -46,7 +47,10 @@ ClassMethod OnPage() As %Status
         Set tOptions.subtitle = $Get(%request.Data("SUBTITLE",1))
         Set tOptions.cube = $Get(%request.Data("CUBE",1))
         Set tOptions.listing = $Get(%request.Data("LISTINGNAME",1))
-        Set tOptions.totals = ($Get(%request.Data("TOTALS",1)) = "1")
+        Set tOptions.rowTotals = ($Get(%request.Data("ROWTOTALS",1)) = "1")
+        Set tOptions.columnTotals = ($Get(%request.Data("COLUMNTOTALS",1)) = "1")
+        Set tOptions.rowTotalAgg = $Get(%request.Data("ROWTOTALAGG",1))
+        Set tOptions.columnTotalAgg = $Get(%request.Data("COLUMNTOTALAGG",1))
         Set tOptions.rowCaptions = $Get(%request.Data("ROWCAPTIONS",1))
         Set tOptions.filters = ##class(BIExport.MDXExport).%ParseFilterPairs($Get(%request.Data("FILTERNAMES",1)), $Get(%request.Data("FILTERVALUES",1)))
 

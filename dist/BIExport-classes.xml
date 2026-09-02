@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Export generator="IRIS" version="26" zv="IRIS for Windows (x86-64) 2026.1 (Build 234U)" ts="2026-09-01 15:31:37">
+<Export generator="IRIS" version="26" zv="IRIS for Windows (x86-64) 2026.1 (Build 234U)" ts="2026-09-02 17:42:58">
 <Class name="BIExport.Favorites">
 <Description><![CDATA[
 Adds a "Favorite" bookmark in the IRIS BI User Portal (the same Favorites list
@@ -93,18 +93,33 @@ into a normalized, JSON-friendly structure that <class>BIExport.XLSXWriter</clas
 Analyzer export buttons (%DeepSee.UI.MDXExcel / %DeepSee.Component.deepseeCSVProvider)
 but keeps real values/types instead of pre-formatting everything as HTML/CSV text.]]></Description>
 <Super>%RegisteredObject</Super>
-<TimeChanged>67799,68915.3311498</TimeChanged>
+<TimeChanged>67815,63730.7346146</TimeChanged>
 <TimeCreated>67795,64951.0911592</TimeCreated>
 
 <Method name="BuildExportData">
-<Description>
+<Description><![CDATA[
 pOptions supported keys (all optional):
   title, subtitle       - %String, printed above the table
   cube                  - %String, cube name/caption - shown on the Info sheet even
                            when title is blank (e.g. an ad-hoc pivot that was never
                            saved, so has no name to show)
   listing               - %String, listing name to use if the MDX is a drillthrough/listing query
-  totals                - %Boolean, include row/column totals (default false)
+  rowTotals             - %Boolean, include a "Total" column (one value per row, summed
+                           across columns) - default false. Independent of columnTotals;
+                           a pivot can have either, both, or neither turned on, and this
+                           must mirror that exactly rather than OR-ing them into one flag
+                           (doing so was a bug - see BIExport.UI.Analyzer's buildExportURL()).
+  columnTotals          - %Boolean, include a "Total" row (one value per column, summed
+                           down rows) - default false. Independent of rowTotals.
+  rowTotalAgg           - %String, aggregation function for rowTotals - one of "sum"
+                           (default), "count", "min", "max", "avg", "pct" (% of total).
+                           Passed straight through to %DeepSee.ResultSet's %GetRowTotal -
+                           these are exactly the values its pAgg parameter accepts, and
+                           also exactly the <option value="..."> values in the Pivot
+                           Options dialog's Summary aggregation dropdown, so no translation
+                           is needed at either end.
+  columnTotalAgg        - %String, aggregation function for columnTotals - same values
+                           as rowTotalAgg, passed to %GetColumnTotal.
   filters               - array of {name, value} objects, printed as a recap block
   rowCaptions            - the row axis's dimension/level captions (e.g. "YearSold",
                            "Product Category"), outermost first. The ResultSet API has
@@ -113,7 +128,7 @@ pOptions supported keys (all optional):
                            the stock exportExcel() passes as ROWCAPTIONS, sourced from
                            table.getRowCaptions().join('\n') - see BIExport.UI.Analyzer's
                            buildExportURL()). Accepts either a %DynamicArray of strings
-                           or a single "\n"-delimited %String in that same format.</Description>
+                           or a single "\n"-delimited %String in that same format.]]></Description>
 <ClassMethod>1</ClassMethod>
 <FormalSpec>pMDX:%String,pOptions:%DynamicObject=""</FormalSpec>
 <ReturnType>%DynamicObject</ReturnType>
@@ -149,8 +164,11 @@ pOptions supported keys (all optional):
         Do ..%BuildListing(tRS, tResult)
     } Else {
         Set tResult.kind = "cellset"
-        Set tTotals = $Select($IsObject(pOptions):(pOptions.totals=1),1:0)
-        Do ..%BuildCellset(tRS, tResult, tTotals)
+        Set tRowTotals = $Select($IsObject(pOptions):(pOptions.rowTotals=1),1:0)
+        Set tColTotals = $Select($IsObject(pOptions):(pOptions.columnTotals=1),1:0)
+        Set tRowTotalAgg = $Select($IsObject(pOptions)&&(pOptions.%Get("rowTotalAgg","")'=""):pOptions.rowTotalAgg,1:"sum")
+        Set tColTotalAgg = $Select($IsObject(pOptions)&&(pOptions.%Get("columnTotalAgg","")'=""):pOptions.columnTotalAgg,1:"sum")
+        Do ..%BuildCellset(tRS, tResult, tRowTotals, tColTotals, tRowTotalAgg, tColTotalAgg)
 
         Set tRowHeaderNames = []
         For n=1:1:tResult.rowHeaderDepth {
@@ -258,9 +276,10 @@ Flattens a drillthrough/listing result into {columns:[{name,numeric}], rows:[[..
 
 <Method name="%BuildCellset">
 <Description>
-Flattens an MDX cellset into headers + typed data cells (+ optional totals).</Description>
+Flattens an MDX cellset into headers + typed data cells (+ optional totals).
+pRowTotals and pColTotals are independent - see BuildExportData's doc comment.</Description>
 <ClassMethod>1</ClassMethod>
-<FormalSpec>pRS:%DeepSee.ResultSet,pResult:%DynamicObject,pTotals:%Boolean</FormalSpec>
+<FormalSpec>pRS:%DeepSee.ResultSet,pResult:%DynamicObject,pRowTotals:%Boolean,pColTotals:%Boolean,pRowTotalAgg:%String="sum",pColTotalAgg:%String="sum"</FormalSpec>
 <Private>1</Private>
 <Implementation><![CDATA[
     Set tAxisCount = pRS.%GetAxisCount()
@@ -384,26 +403,38 @@ Flattens an MDX cellset into headers + typed data cells (+ optional totals).</De
     }
     Set pResult.cells = tData
 
-    If ('pTotals) Quit
+    If ('pRowTotals) && ('pColTotals) Quit
 
-    // Column totals (one value per column, summed down the rows) + row totals (one per row) + grand total.
-    Set tColTotals = []
-    For c=1:1:tColCount {
-        Set tFormat = $Select($Get(tColFormat(c))'="":tColFormat(c),1:tDefaultFormat)
-        Do tColTotals.%Push(..%MakeCell(pRS.%GetColumnTotal(c),tFormat))
+    // Column totals: one value per column, summed down the rows - rendered as a "Total" row.
+    // "pct" (% of Total) returns a raw 0-1 fraction, not a value in the column's own
+    // units, so it needs its own percent format rather than the column's normal one.
+    If (pColTotals) {
+        Set tColTotals = []
+        Set tColPct = (pColTotalAgg="pct")
+        For c=1:1:tColCount {
+            Set tFormat = $Select(tColPct:"0.00%",$Get(tColFormat(c))'="":tColFormat(c),1:tDefaultFormat)
+            Do tColTotals.%Push(..%MakeCell(pRS.%GetColumnTotal(c,pColTotalAgg),tFormat))
+        }
+        Set pResult.columnTotals = tColTotals
+        Set pResult.columnTotalAgg = pColTotalAgg
     }
-    Set pResult.columnTotals = tColTotals
 
-    Set tRowTotals = []
-    Set tGrandTotal = 0
-    For r=1:1:tRowCount {
-        Set tFormat = $Select($Get(tRowFormat(r))'="":tRowFormat(r),1:tDefaultFormat)
-        Set tSum = pRS.%GetRowTotal(r)
-        Set tGrandTotal = tGrandTotal + tSum
-        Do tRowTotals.%Push(..%MakeCell(tSum,tFormat))
+    // Row totals: one value per row, summed across columns - rendered as a "Total" column.
+    // Grand total is only meaningful (and only used by the writer) alongside row totals.
+    If (pRowTotals) {
+        Set tRowTotals = []
+        Set tGrandTotal = 0
+        Set tRowPct = (pRowTotalAgg="pct")
+        For r=1:1:tRowCount {
+            Set tFormat = $Select(tRowPct:"0.00%",$Get(tRowFormat(r))'="":tRowFormat(r),1:tDefaultFormat)
+            Set tSum = pRS.%GetRowTotal(r,pRowTotalAgg)
+            Set tGrandTotal = tGrandTotal + tSum
+            Do tRowTotals.%Push(..%MakeCell(tSum,tFormat))
+        }
+        Set pResult.rowTotals = tRowTotals
+        Set pResult.rowTotalAgg = pRowTotalAgg
+        Set pResult.grandTotal = ..%MakeCell(tGrandTotal,$Select(tRowPct:"0.00%",1:tDefaultFormat))
     }
-    Set pResult.rowTotals = tRowTotals
-    Set pResult.grandTotal = ..%MakeCell(tGrandTotal,tDefaultFormat)
 ]]></Implementation>
 </Method>
 
@@ -553,7 +584,7 @@ REST service exposing real-file BI exports (starting with genuine .xlsx,
 replacing the Analyzer's HTML-saved-as-.xls behavior). See CLAUDE.md for
 the design rationale and docs/iris-environment.md for how this is deployed.</Description>
 <Super>%CSP.REST</Super>
-<TimeChanged>67795,64951.1918431</TimeChanged>
+<TimeChanged>67815,63538.7229539</TimeChanged>
 <TimeCreated>67795,64951.1918431</TimeCreated>
 
 <Parameter name="HandleCorsRequest">
@@ -579,7 +610,13 @@ POST body (JSON): {
   "cube": "HoleFoods Sales",         - optional, shown on the Info sheet even with
                                        no title, and used in the default filename
   "listing": "ListingName",          - optional, for drillthrough/listing MDX
-  "totals": true,                    - optional, include row/column totals
+  "rowTotals": true,                 - optional, include a "Total" column (per-row sums)
+  "columnTotals": true,              - optional, include a "Total" row (per-column sums) -
+                                       independent of rowTotals; a pivot can have either,
+                                       both, or neither
+  "rowTotalAgg": "avg",              - optional, aggregation for rowTotals: "sum"
+                                       (default), "count", "min", "max", "avg", "pct"
+  "columnTotalAgg": "avg",           - optional, aggregation for columnTotals, same values
   "filters": [{"name":"...","value":"..."}]  - optional, recap block on the Info sheet
   "rowCaptions": ["YearSold", ...]   - optional, row axis dimension captions (outermost
                                        first) for the row-header columns; the MDX/
@@ -630,7 +667,7 @@ POST body (JSON): {
 <Method name="ExportJSON">
 <Description>
 POST body (JSON): same fields as /xlsx (mdx, filename, title, subtitle, listing,
-totals, filters) - returns BIExport.MDXExport's normalized structure as-is. No
+rowTotals, columnTotals, filters) - returns BIExport.MDXExport's normalized structure as-is. No
 Python involved: %DynamicObject already has %ToJSON(), so this is pure ObjectScript.</Description>
 <ClassMethod>1</ClassMethod>
 <ReturnType>%Status</ReturnType>
@@ -704,7 +741,7 @@ name instead of the "_DeepSee.UI.Analyzer.zen" alias, e.g.
 /csp/<namespace>/BIExport.UI.Analyzer.cls?CUBE=... - point any links/shortcuts at
 this URL instead of the stock one to pick up the new options.]]></Description>
 <Super>%DeepSee.UI.Analyzer</Super>
-<TimeChanged>67814,55652.936676</TimeChanged>
+<TimeChanged>67815,63538.8052089</TimeChanged>
 <TimeCreated>67795,64951.3229184</TimeCreated>
 
 <Parameter name="ANALYZERURL">
@@ -861,8 +898,36 @@ pPage is the target page class name, pExtension the default filename extension.<
     if (table.listing != '') {
         url += '&LISTINGNAME=' + encodeURIComponent(table.listing);
     }
-    if (table.rowTotals || table.columnTotals) {
-        url += '&TOTALS=1';
+    // table.rowTotals/table.columnTotals are independent pivot options - a pivot can
+    // have either, both, or neither. These must stay separate params: OR-ing them into
+    // one combined flag made the export always render BOTH totals whenever ONE was
+    // enabled, adding an unrequested "Total" column/row that often summed unrelated
+    // measures together.
+    //
+    // The widget's own property names are the OPPOSITE of what they render: checking
+    // "Row Options -> Summary" sets table.rowTotals=true (and table.rowTotalAgg to the
+    // aggregation dropdown next to it) but renders an extra Totals ROW (confirmed live -
+    // Pivot Options dialog, control_21), and "Column Options -> Summary"
+    // (table.columnTotals/table.columnTotalAgg) renders an extra Totals COLUMN.
+    // ROWTOTALS/COLUMNTOTALS on our own REST API mean what they say (see MDXExport.cls's
+    // doc comment: ROWTOTALS = "Total" column, COLUMNTOTALS = "Total" row), so the
+    // mapping below - flags AND their aggregation functions - is deliberately crossed to
+    // match what actually renders in the Analyzer, not the widget's own (misleading)
+    // property names. table.rowTotalAgg/table.columnTotalAgg values ("sum", "count",
+    // "min", "max", "avg", "pct") pass straight through with no translation - they're
+    // exactly what MDXExport.cls's rowTotalAgg/columnTotalAgg options (and
+    // %DeepSee.ResultSet's own %GetRowTotal/%GetColumnTotal) expect.
+    if (table.rowTotals) {
+        url += '&COLUMNTOTALS=1';
+        if (table.rowTotalAgg) {
+            url += '&COLUMNTOTALAGG=' + encodeURIComponent(table.rowTotalAgg);
+        }
+    }
+    if (table.columnTotals) {
+        url += '&ROWTOTALS=1';
+        if (table.columnTotalAgg) {
+            url += '&ROWTOTALAGG=' + encodeURIComponent(table.columnTotalAgg);
+        }
     }
     // Row axis dimension/level captions (e.g. "YearSold","Product Category") - the
     // ResultSet API has no way to derive these; the pivot table widget already has
@@ -910,7 +975,7 @@ login session is reused automatically instead of hitting <class>BIExport.REST</c
 separate session/cookie scope.]]></Description>
 <IncludeCode>%DeepSee</IncludeCode>
 <Super>%CSP.Page</Super>
-<TimeChanged>67795,64951.3675012</TimeChanged>
+<TimeChanged>67815,63539.3131396</TimeChanged>
 <TimeCreated>67795,64951.3675012</TimeCreated>
 
 <Parameter name="CONTENTTYPE">
@@ -937,7 +1002,8 @@ does exactly this same thing, in this exact same method, for the same reason.</D
 <Description><![CDATA[
 Query parameters (same names/meaning as <class>BIExport.UI.XLSXPage</class>):
   MDX or NONCE   - the query text, or a nonce created via CreateQueryNonce() for long MDX
-  TITLE, SUBTITLE, LISTINGNAME, TOTALS (1/0), FILENAME]]></Description>
+  TITLE, SUBTITLE, LISTINGNAME, ROWTOTALS (1/0), COLUMNTOTALS (1/0),
+  ROWTOTALAGG, COLUMNTOTALAGG ("sum"/"count"/"min"/"max"/"avg"/"pct"), FILENAME]]></Description>
 <ClassMethod>1</ClassMethod>
 <ReturnType>%Status</ReturnType>
 <Implementation><![CDATA[
@@ -960,7 +1026,10 @@ Query parameters (same names/meaning as <class>BIExport.UI.XLSXPage</class>):
         Set tOptions.subtitle = $Get(%request.Data("SUBTITLE",1))
         Set tOptions.cube = $Get(%request.Data("CUBE",1))
         Set tOptions.listing = $Get(%request.Data("LISTINGNAME",1))
-        Set tOptions.totals = ($Get(%request.Data("TOTALS",1)) = "1")
+        Set tOptions.rowTotals = ($Get(%request.Data("ROWTOTALS",1)) = "1")
+        Set tOptions.columnTotals = ($Get(%request.Data("COLUMNTOTALS",1)) = "1")
+        Set tOptions.rowTotalAgg = $Get(%request.Data("ROWTOTALAGG",1))
+        Set tOptions.columnTotalAgg = $Get(%request.Data("COLUMNTOTALAGG",1))
         Set tOptions.rowCaptions = $Get(%request.Data("ROWCAPTIONS",1))
         Set tOptions.filters = ##class(BIExport.MDXExport).%ParseFilterPairs($Get(%request.Data("FILTERNAMES",1)), $Get(%request.Data("FILTERVALUES",1)))
 
@@ -989,7 +1058,7 @@ would otherwise force a second login when called from inside an already-open
 Analyzer tab - this class exists specifically to avoid that.]]></Description>
 <IncludeCode>%DeepSee</IncludeCode>
 <Super>%CSP.Page</Super>
-<TimeChanged>67795,64951.4122832</TimeChanged>
+<TimeChanged>67815,63539.3771975</TimeChanged>
 <TimeCreated>67795,64951.4122832</TimeCreated>
 
 <Parameter name="CONTENTTYPE">
@@ -1019,7 +1088,8 @@ same method, for the same reason.</Description>
 <Description>
 Query parameters (same names/meaning as the stock MDXExcel page where they overlap):
   MDX or NONCE   - the query text, or a nonce created via CreateQueryNonce() for long MDX
-  TITLE, SUBTITLE, LISTINGNAME, TOTALS (1/0), FILENAME</Description>
+  TITLE, SUBTITLE, LISTINGNAME, ROWTOTALS (1/0), COLUMNTOTALS (1/0),
+  ROWTOTALAGG, COLUMNTOTALAGG ("sum"/"count"/"min"/"max"/"avg"/"pct"), FILENAME</Description>
 <ClassMethod>1</ClassMethod>
 <ReturnType>%Status</ReturnType>
 <Implementation><![CDATA[
@@ -1042,7 +1112,10 @@ Query parameters (same names/meaning as the stock MDXExcel page where they overl
         Set tOptions.subtitle = $Get(%request.Data("SUBTITLE",1))
         Set tOptions.cube = $Get(%request.Data("CUBE",1))
         Set tOptions.listing = $Get(%request.Data("LISTINGNAME",1))
-        Set tOptions.totals = ($Get(%request.Data("TOTALS",1)) = "1")
+        Set tOptions.rowTotals = ($Get(%request.Data("ROWTOTALS",1)) = "1")
+        Set tOptions.columnTotals = ($Get(%request.Data("COLUMNTOTALS",1)) = "1")
+        Set tOptions.rowTotalAgg = $Get(%request.Data("ROWTOTALAGG",1))
+        Set tOptions.columnTotalAgg = $Get(%request.Data("COLUMNTOTALAGG",1))
         Set tOptions.rowCaptions = $Get(%request.Data("ROWCAPTIONS",1))
         Set tOptions.filters = ##class(BIExport.MDXExport).%ParseFilterPairs($Get(%request.Data("FILTERNAMES",1)), $Get(%request.Data("FILTERVALUES",1)))
 
@@ -1075,7 +1148,7 @@ rows, sortable, recognized as a table by Excel/other tools) starting at A1 - the
 header row is never pushed down by metadata. Title/subtitle/filters instead go on
 a separate "Info" sheet, plus the workbook's own document properties.]]></Description>
 <Super>%RegisteredObject</Super>
-<TimeChanged>67808,82257.4492721</TimeChanged>
+<TimeChanged>67815,63732.0810376</TimeChanged>
 <TimeCreated>67795,64951.2405293</TimeCreated>
 
 <Method name="BuildXLSX">
@@ -1234,6 +1307,15 @@ else:
     column_totals = data.get("columnTotals")
     row_totals = data.get("rowTotals")
     grand_total = data.get("grandTotal")
+    # Excel's own totalsRowFunction vocabulary (ECMA-376): none/sum/min/max/average/
+    # count/countNums/stdDev/var/custom. Our aggregation keys match 1:1 except "avg"
+    # (-> "average") and "pct" (% of total has no equivalent - "custom" means "not one
+    # of Excel's built-in functions", which is accurate: there's no live formula behind
+    # it, just the precomputed value).
+    TOTALS_ROW_FUNCTION = {"sum": "sum", "count": "count", "min": "min", "max": "max",
+                           "avg": "average", "pct": "custom"}
+    col_totals_row_function = TOTALS_ROW_FUNCTION.get(data.get("columnTotalAgg", "sum"), "custom")
+    row_totals_row_function = TOTALS_ROW_FUNCTION.get(data.get("rowTotalAgg", "sum"), "custom")
 
     if col_count == 0 or row_count == 0:
         ws.cell(row=1, column=1, value="No results")
@@ -1374,9 +1456,9 @@ else:
             if row_header_depth > 0:
                 tbl.tableColumns[row_header_depth - 1].totalsRowLabel = "Total"
             for j in range(col_count):
-                tbl.tableColumns[row_header_depth + j].totalsRowFunction = "sum"
+                tbl.tableColumns[row_header_depth + j].totalsRowFunction = col_totals_row_function
             if has_row_totals:
-                tbl.tableColumns[row_header_depth + col_count].totalsRowFunction = "sum"
+                tbl.tableColumns[row_header_depth + col_count].totalsRowFunction = row_totals_row_function
             for c in range(1, last_col + 1):
                 ws.cell(row=totals_row_num, column=c).font = HEADER_FONT
 

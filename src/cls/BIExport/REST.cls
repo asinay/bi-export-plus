@@ -22,7 +22,13 @@ XData UrlMap
 ///   "cube": "HoleFoods Sales",         - optional, shown on the Info sheet even with
 ///                                        no title, and used in the default filename
 ///   "listing": "ListingName",          - optional, for drillthrough/listing MDX
-///   "totals": true,                    - optional, include row/column totals
+///   "rowTotals": true,                 - optional, include a "Total" column (per-row sums)
+///   "columnTotals": true,              - optional, include a "Total" row (per-column sums) -
+///                                        independent of rowTotals; a pivot can have either,
+///                                        both, or neither
+///   "rowTotalAgg": "avg",              - optional, aggregation for rowTotals: "sum"
+///                                        (default), "count", "min", "max", "avg", "pct"
+///   "columnTotalAgg": "avg",           - optional, aggregation for columnTotals, same values
 ///   "filters": [{"name":"...","value":"..."}]  - optional, recap block on the Info sheet
 ///   "rowCaptions": ["YearSold", ...]   - optional, row axis dimension captions (outermost
 ///                                        first) for the row-header columns; the MDX/
@@ -69,7 +75,7 @@ ClassMethod ExportXLSX() As %Status
 }
 
 /// POST body (JSON): same fields as /xlsx (mdx, filename, title, subtitle, listing,
-/// totals, filters) - returns BIExport.MDXExport's normalized structure as-is. No
+/// rowTotals, columnTotals, filters) - returns BIExport.MDXExport's normalized structure as-is. No
 /// Python involved: %DynamicObject already has %ToJSON(), so this is pure ObjectScript.
 ClassMethod ExportJSON() As %Status
 {

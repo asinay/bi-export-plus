@@ -142,8 +142,36 @@ ClientMethod buildExportURL(pPage, pExtension) [ Language = javascript ]
     if (table.listing != '') {
         url += '&LISTINGNAME=' + encodeURIComponent(table.listing);
     }
-    if (table.rowTotals || table.columnTotals) {
-        url += '&TOTALS=1';
+    // table.rowTotals/table.columnTotals are independent pivot options - a pivot can
+    // have either, both, or neither. These must stay separate params: OR-ing them into
+    // one combined flag made the export always render BOTH totals whenever ONE was
+    // enabled, adding an unrequested "Total" column/row that often summed unrelated
+    // measures together.
+    //
+    // The widget's own property names are the OPPOSITE of what they render: checking
+    // "Row Options -> Summary" sets table.rowTotals=true (and table.rowTotalAgg to the
+    // aggregation dropdown next to it) but renders an extra Totals ROW (confirmed live -
+    // Pivot Options dialog, control_21), and "Column Options -> Summary"
+    // (table.columnTotals/table.columnTotalAgg) renders an extra Totals COLUMN.
+    // ROWTOTALS/COLUMNTOTALS on our own REST API mean what they say (see MDXExport.cls's
+    // doc comment: ROWTOTALS = "Total" column, COLUMNTOTALS = "Total" row), so the
+    // mapping below - flags AND their aggregation functions - is deliberately crossed to
+    // match what actually renders in the Analyzer, not the widget's own (misleading)
+    // property names. table.rowTotalAgg/table.columnTotalAgg values ("sum", "count",
+    // "min", "max", "avg", "pct") pass straight through with no translation - they're
+    // exactly what MDXExport.cls's rowTotalAgg/columnTotalAgg options (and
+    // %DeepSee.ResultSet's own %GetRowTotal/%GetColumnTotal) expect.
+    if (table.rowTotals) {
+        url += '&COLUMNTOTALS=1';
+        if (table.rowTotalAgg) {
+            url += '&COLUMNTOTALAGG=' + encodeURIComponent(table.rowTotalAgg);
+        }
+    }
+    if (table.columnTotals) {
+        url += '&ROWTOTALS=1';
+        if (table.columnTotalAgg) {
+            url += '&ROWTOTALAGG=' + encodeURIComponent(table.columnTotalAgg);
+        }
     }
     // Row axis dimension/level captions (e.g. "YearSold","Product Category") - the
     // ResultSet API has no way to derive these; the pivot table widget already has

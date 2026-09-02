@@ -1,7 +1,8 @@
 # Quick start: try it out in the Analyzer UI
 
-Minimum steps to try the new **Excel Workbook**/**JSON** export buttons. (Skip
-this if you need the standalone REST API too - see [README.md](README.md).)
+Four steps, no IPM required, to see the new **Excel Workbook**/**JSON** export
+buttons working in your own Analyzer. (Skip this if you already know you want
+the standalone REST API too - see [README.md](README.md).)
 
 ## 1. Confirm Embedded Python is enabled, then install openpyxl
 
@@ -53,3 +54,11 @@ same.
 
 Open the pivot's **Export** dropdown - you'll see **Excel Workbook** and
 **JSON** next to the stock Excel/CSV options. Pick one and it downloads.
+
+## Next steps
+
+Liked it? [README.md](README.md) covers the parts left out here on purpose:
+installing via IPM/ZPM (registers the REST API's web application for you),
+calling the REST API directly from scripts, adding a Favorites bookmark
+instead of retyping the URL every time, the full list of export options
+(totals, filters, row captions, ...), and known limitations.

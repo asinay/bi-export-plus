@@ -160,6 +160,15 @@ else:
     column_totals = data.get("columnTotals")
     row_totals = data.get("rowTotals")
     grand_total = data.get("grandTotal")
+    # Excel's own totalsRowFunction vocabulary (ECMA-376): none/sum/min/max/average/
+    # count/countNums/stdDev/var/custom. Our aggregation keys match 1:1 except "avg"
+    # (-> "average") and "pct" (% of total has no equivalent - "custom" means "not one
+    # of Excel's built-in functions", which is accurate: there's no live formula behind
+    # it, just the precomputed value).
+    TOTALS_ROW_FUNCTION = {"sum": "sum", "count": "count", "min": "min", "max": "max",
+                           "avg": "average", "pct": "custom"}
+    col_totals_row_function = TOTALS_ROW_FUNCTION.get(data.get("columnTotalAgg", "sum"), "custom")
+    row_totals_row_function = TOTALS_ROW_FUNCTION.get(data.get("rowTotalAgg", "sum"), "custom")
 
     if col_count == 0 or row_count == 0:
         ws.cell(row=1, column=1, value="No results")
@@ -300,9 +309,9 @@ else:
             if row_header_depth > 0:
                 tbl.tableColumns[row_header_depth - 1].totalsRowLabel = "Total"
             for j in range(col_count):
-                tbl.tableColumns[row_header_depth + j].totalsRowFunction = "sum"
+                tbl.tableColumns[row_header_depth + j].totalsRowFunction = col_totals_row_function
             if has_row_totals:
-                tbl.tableColumns[row_header_depth + col_count].totalsRowFunction = "sum"
+                tbl.tableColumns[row_header_depth + col_count].totalsRowFunction = row_totals_row_function
             for c in range(1, last_col + 1):
                 ws.cell(row=totals_row_num, column=c).font = HEADER_FONT
 
