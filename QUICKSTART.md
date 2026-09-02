@@ -4,6 +4,10 @@ Four steps, no IPM required, to see the new **Excel Workbook**/**JSON** export
 buttons working in your own Analyzer. (Skip this if you already know you want
 the standalone REST API too - see [README.md](README.md).)
 
+Even faster, no pivot required at all: after step 2 below, open
+`BIExport.UI.DemoPage.cls` instead of step 3 - it's a self-contained form with a
+few canned queries that downloads a real file with one click.
+
 ## 1. Confirm Embedded Python is enabled, then install openpyxl
 
 From an IRIS terminal, in any namespace:

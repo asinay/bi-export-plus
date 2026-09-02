@@ -122,6 +122,16 @@ application manually per step 2 of Option B above.
 
 ## Usage
 
+### Just want to see it work? Try the demo page
+
+No pivot needed - `BIExport.UI.DemoPage.cls` is a self-contained form with a few
+canned MDX queries and totals/aggregation toggles. Pick one, click a button, get a
+real `.xlsx`/`.json` download, using the exact same code path as the buttons below:
+
+```
+/csp/<namespace>/BIExport.UI.DemoPage.cls
+```
+
 ### Option A: In-Analyzer export buttons
 
 Open your pivots via `BIExport.UI.Analyzer.cls` instead of the stock
