@@ -1,5 +1,9 @@
 # bi-export-plus
 
+<p align="left">
+  <img src="assets/bi-export-plus logo v1.png" alt="bi-export-plus logo" width="200">
+</p>
+
 Real, binary `.xlsx` (and typed JSON) exports for the InterSystems IRIS BI/DeepSee
 Analyzer — no more opening "Export to Excel" and getting an HTML table wearing an
 `.xls` extension.
@@ -12,10 +16,10 @@ Analyzer — no more opening "Export to Excel" and getting an HTML table wearing
 **New here?** → **[Try it in 2 minutes](QUICKSTART.md)**. Everything below is the
 full reference: every install option, every request field, every limitation.
 
-<p align="center">
+<p align="left">
   <img src="screenshots/export-dropdown.png" alt="Excel Workbook and JSON in the Analyzer's Export dropdown" width="480">
 </p>
-<p align="center"><em>The new buttons, right next to the stock Excel/CSV ones.</em></p>
+<p align="left"><em>The new buttons, right next to the stock Excel/CSV ones.</em></p>
 
 <table>
 <tr>
@@ -150,7 +154,7 @@ real `.xlsx`/`.json` download, using the exact same code path as the buttons bel
 /csp/<namespace>/BIExport.UI.DemoPage.cls
 ```
 
-<p align="center">
+<p align="left">
   <img src="screenshots/demo-page.png" alt="Standalone demo page with sample queries and totals toggles" width="600">
 </p>
 
@@ -219,10 +223,10 @@ Supported request body fields:
 | `filters` | no | `[{"name": "...", "value": "..."}]` recap block on the Info sheet |
 | `rowCaptions` | no | Row axis dimension captions (outermost first), for the row-header columns |
 
-<p align="center">
+<p align="left">
   <img src="screenshots/pivot-options-totals.png" alt="Pivot Options dialog's Summary aggregation dropdown" width="420">
 </p>
-<p align="center"><em><code>rowTotalAgg</code>/<code>columnTotalAgg</code> take the same values as this dropdown - no translation needed.</em></p>
+<p align="left"><em><code>rowTotalAgg</code>/<code>columnTotalAgg</code> take the same values as this dropdown - no translation needed.</em></p>
 
 See sample output in [samples/](samples).
 
