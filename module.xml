@@ -3,7 +3,7 @@
   <Document name="bi-export-plus.ZPM">
     <Module>
       <Name>bi-export-plus</Name>
-      <Version>1.1.0</Version>
+      <Version>1.1.1</Version>
       <Packaging>module</Packaging>
       <SourcesRoot>src</SourcesRoot>
       <Description>Real, binary .xlsx (and typed JSON) exports for the InterSystems IRIS BI/DeepSee Analyzer, replacing the legacy HTML-saved-as-.xls "Export to Excel" behavior. Adds "Excel Workbook" and "JSON" items to the Analyzer's own Export dropdown, plus a standalone REST API for external tools.</Description>
