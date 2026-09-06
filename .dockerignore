@@ -1,0 +1,7 @@
+.git
+dist
+docs
+screenshots
+assets
+samples
+*.md

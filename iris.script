@@ -1,0 +1,9 @@
+ ; add a bit of standard docker comfort
+ zn "%SYS"
+ do ##class(Security.Users).UnExpireUserPasswords("*")
+
+ zn "USER"
+ zpm "install samples-bi"
+ zpm "load /opt/irisapp/ -v"
+
+ halt
