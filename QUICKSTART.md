@@ -1,8 +1,23 @@
 # Quick start: try it out in the Analyzer UI
 
-Four steps, no IPM required, to see the new **Excel Workbook**/**JSON** export
-buttons working in your own Analyzer. (Skip this if you already know you want
-the standalone REST API too - see [README.md](README.md).)
+**Don't have an IRIS instance handy, or don't want to touch the one you have?**
+Skip everything below:
+
+```bash
+docker run -d -p 52773:52773 -p 1972:1972 ghcr.io/asinay/bi-export-plus:latest
+```
+
+It ships with sample BI data ([Samples-BI](https://github.com/intersystems/Samples-BI))
+and this module already installed, openpyxl included - open
+<http://localhost:52773/csp/user/BIExport.UI.DemoPage.cls> and you're exporting real
+files in under a minute. See [README.md](README.md) for more (REST API, dashboard
+export, building the image yourself instead of pulling it).
+
+---
+
+Otherwise, four steps, no IPM required, to see the new **Excel Workbook**/**JSON**
+export buttons working in your own Analyzer, against your own pivots. (Skip this if
+you already know you want the standalone REST API too - see [README.md](README.md).)
 
 Even faster, no pivot required at all: after step 2 below, open
 `BIExport.UI.DemoPage.cls` instead of step 3 - it's a self-contained form with a
@@ -64,5 +79,6 @@ Open the pivot's **Export** dropdown - you'll see **Excel Workbook** and
 Liked it? [README.md](README.md) covers the parts left out here on purpose:
 installing via IPM/ZPM (registers the REST API's web application for you),
 calling the REST API directly from scripts, adding a Favorites bookmark
-instead of retyping the URL every time, the full list of export options
-(totals, filters, row captions, ...), and known limitations.
+instead of retyping the URL every time, exporting whole Dashboards (not just
+single pivots), the full list of export options (totals, filters, row
+captions, ...), and known limitations.

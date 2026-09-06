@@ -13,8 +13,27 @@ Analyzer — no more opening "Export to Excel" and getting an HTML table wearing
 - A standalone REST API (`/csp/bi-export/xlsx`, `/csp/bi-export/json`) too, for
   pulling the same exports from scripts/automation without opening the Analyzer.
 
-**New here?** → **[Try it in 2 minutes](QUICKSTART.md)**. Everything below is the
-full reference: every install option, every request field, every limitation.
+## Try it now - no install, no existing IRIS needed
+
+```bash
+docker run -d -p 52773:52773 -p 1972:1972 ghcr.io/asinay/bi-export-plus:latest
+```
+
+Ships with [Samples-BI](https://github.com/intersystems/Samples-BI) (InterSystems'
+own sample BI cubes/dashboards) and this module both pre-installed - openpyxl
+included - so there's real data to export the moment it starts:
+
+- Demo page, no pivot needed: <http://localhost:52773/csp/user/BIExport.UI.DemoPage.cls>
+- Analyzer, on the sample HoleFoods cube: <http://localhost:52773/csp/user/BIExport.UI.Analyzer.cls?CUBE=HOLEFOODS>
+- Management Portal: <http://localhost:52773/csp/sys/UtilHome.csp> (login `_SYSTEM` / `SYS`)
+
+Building it yourself instead of pulling: clone this repo and run
+`docker compose up --build` (see [Dockerfile](Dockerfile)). Either way, drop the
+container when you're done - nothing here touches an existing IRIS instance.
+
+**Already running IRIS somewhere and want to add this to it instead?** →
+**[Try it in 2 minutes](QUICKSTART.md)**, or keep reading for the full reference
+below (every install option, every request field, every limitation).
 
 <p align="left">
   <img src="screenshots/export-dropdown.png" alt="Excel Workbook and JSON in the Analyzer's Export dropdown" width="480">
@@ -56,7 +75,17 @@ Do ##class(%SYS.Python).Import("openpyxl")
 If that errors, fix the Python/openpyxl setup before installing this module -
 the xlsx export will fail at runtime otherwise.
 
+If openpyxl turns out not to be importable at runtime anyway, every export surface
+(Analyzer buttons, dashboard widget buttons, demo page, REST API) detects it and degrades
+gracefully instead of producing a broken download - buttons gray out with an explanation
+in their tooltip, and the REST API returns `503` with a plain-text reason. JSON export is
+never affected either way, since it needs no Python.
+
 ## Installation
+
+Just want to try it out rather than add it to a real instance? See
+[Try it now with Docker](#try-it-now---no-install-no-existing-iris-needed) above instead -
+nothing below is needed for that.
 
 **Recommended: InterSystems Package Manager (IPM/ZPM).** If this module has been
 published to the IPM registry:
@@ -230,6 +259,39 @@ Supported request body fields:
 
 See sample output in [samples/](samples).
 
+### Option C: Dashboard export
+
+Two related pieces, for saved Dashboards rather than ad-hoc pivots:
+
+**Per-widget buttons.** Same Excel Workbook/JSON buttons as the Analyzer, but on an
+individual dashboard widget's own Export dropdown. Existing widgets need to be converted
+to the export-capable widget class once:
+
+```objectscript
+Do ##class(BIExport.DashboardTools).ConvertWidget("<folder>/<dashboard>.dashboard", "<widget name>")
+```
+
+or, to convert every pivot-family widget on a dashboard in one call:
+
+```objectscript
+Do ##class(BIExport.DashboardTools).ConvertAllWidgets("<folder>/<dashboard>.dashboard")
+```
+
+`RevertWidget(pDashboardFullName, pWidgetName)` undoes a single conversion. New
+dashboards can also just set a widget's `type` to `BIExport.UI.Widget.pivot` directly in
+the Dashboard Editor's widget definition, instead of converting after the fact.
+
+**Whole-dashboard export.** Open the dashboard via `BIExport.UI.DashboardViewer.cls`
+instead of the stock `_DeepSee.UserPortal.DashboardViewer.zen` (same query params):
+
+```
+/csp/<namespace>/BIExport.UI.DashboardViewer.cls?DASHBOARD=...
+```
+
+then use **Export Dashboard**, in the small text-menu row at the bottom of the page
+(next to Home/About/Logout) - it downloads one `.xlsx` workbook with one sheet per pivot
+widget on that dashboard.
+
 ## Known limitations
 
 - **Totals across mixed measures.** If a row/column axis mixes different
@@ -243,6 +305,16 @@ See sample output in [samples/](samples).
   Excel's Table feature can't have (exactly one header row allowed) - that
   export keeps the merged header and skips the Table (no autofilter/banded
   rows), with a note on the Info sheet explaining why.
+- **Whole-dashboard export uses each widget's SAVED state.** It resolves every widget
+  from its saved pivot definition, not whatever the dashboard viewer session currently
+  has on-screen (unsaved filter changes, unsaved widget tweaks) - there's no browser
+  session available to the server-side export code. Save the dashboard first if you want
+  those reflected. The per-widget export buttons don't have this limitation - they run
+  against the widget's live, on-screen state.
+- **Whole-dashboard export uses generic row-header labels.** With no live pivot table
+  widget to query for row-axis captions in that path, every sheet's row headers fall back
+  to generic "Row 1"/"Row 2" labels rather than the dimension names a per-widget or
+  Analyzer export shows.
 
 ## License
 
