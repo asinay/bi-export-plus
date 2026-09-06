@@ -19,21 +19,19 @@ Analyzer — no more opening "Export to Excel" and getting an HTML table wearing
 docker run -d -p 52773:52773 -p 1972:1972 ghcr.io/asinay/bi-export-plus:latest
 ```
 
-Ships with [Samples-BI](https://github.com/intersystems/Samples-BI) (InterSystems'
-own sample BI cubes/dashboards) and this module both pre-installed - openpyxl
-included - so there's real data to export the moment it starts:
+Pre-loaded with [Samples-BI](https://github.com/intersystems/Samples-BI) and this
+module - openpyxl included - so there's real data to export immediately:
 
-- Demo page, no pivot needed: <http://localhost:52773/csp/user/BIExport.UI.DemoPage.cls>
-- Analyzer, on the sample HoleFoods cube: <http://localhost:52773/csp/user/BIExport.UI.Analyzer.cls?CUBE=HOLEFOODS>
-- Management Portal: <http://localhost:52773/csp/sys/UtilHome.csp> (login `_SYSTEM` / `SYS`)
+| | |
+|---|---|
+| Demo page, no pivot needed | http://localhost:52773/csp/user/BIExport.UI.DemoPage.cls |
+| Analyzer, on the sample HoleFoods cube | http://localhost:52773/csp/user/BIExport.UI.Analyzer.cls?CUBE=HOLEFOODS |
+| Management Portal (login `_SYSTEM` / `SYS`) | http://localhost:52773/csp/sys/UtilHome.csp |
 
-Building it yourself instead of pulling: clone this repo and run
-`docker compose up --build` (see [Dockerfile](Dockerfile)). Either way, drop the
-container when you're done - nothing here touches an existing IRIS instance.
-
-**Already running IRIS somewhere and want to add this to it instead?** →
-**[Try it in 2 minutes](QUICKSTART.md)**, or keep reading for the full reference
-below (every install option, every request field, every limitation).
+Building it yourself instead of pulling: `docker compose up --build` (see
+[Dockerfile](Dockerfile)). Already running IRIS elsewhere? →
+[Try it in 2 minutes](QUICKSTART.md) instead, or keep reading for the full
+reference below.
 
 <p align="left">
   <img src="screenshots/export-dropdown.png" alt="Excel Workbook and JSON in the Analyzer's Export dropdown" width="480">
@@ -291,6 +289,17 @@ instead of the stock `_DeepSee.UserPortal.DashboardViewer.zen` (same query param
 then use **Export Dashboard**, in the small text-menu row at the bottom of the page
 (next to Home/About/Logout) - it downloads one `.xlsx` workbook with one sheet per pivot
 widget on that dashboard.
+
+**Try it against a real dashboard**, using the [Docker image](#try-it-now---no-install-no-existing-iris-needed)'s
+preloaded Samples-BI data - no conversion needed first, since whole-dashboard export
+reads any pivot-family widget, stock type included:
+
+```
+http://localhost:52773/csp/user/BIExport.UI.DashboardViewer.cls?DASHBOARD=Basic%20Dashboard%20Demo.dashboard
+```
+
+Click **Export Dashboard** at the bottom - downloads a 3-sheet workbook (Info sheet plus
+one sheet per pivot widget on that dashboard).
 
 ## Known limitations
 
