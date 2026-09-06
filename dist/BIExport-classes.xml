@@ -1,5 +1,408 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Export generator="IRIS" version="26" zv="IRIS for Windows (x86-64) 2026.1 (Build 234U)" ts="2026-09-02 19:16:17">
+<Export generator="IRIS" version="26" zv="IRIS for Windows (x86-64) 2026.1 (Build 234U)" ts="2026-09-04 10:24:10">
+<Class name="BIExport.DashboardExport">
+<Description><![CDATA[
+Pure ObjectScript (no Python): resolves every pivot widget on a saved dashboard into
+the same normalized export structure <class>BIExport.MDXExport</class> already
+produces for a single pivot, so <class>BIExport.XLSXWriter</class>'s
+<method>BuildMultiSheetXLSX</method> can turn a whole dashboard into one workbook -
+one sheet per pivot widget - without any of the cellset-flattening logic being
+duplicated. <method>BuildDashboardExportData</method> is this class's only public
+entry point; everything else is a private helper for it.
+
+Resolving a saved pivot into a live, queryable <class>%DeepSee.Component.pivotTable</class>
+uses the exact same <method>%OpenFolderItem</method> + <method>%CopyToComponent</method>
+sequence <class>%DeepSee.Component.Widget.pivot</class>'s own <method>%LoadPivotInfo</method>
+uses (confirmed live by dumping that method's compiled source) - but here the
+<class>%DeepSee.Component.pivotTable</class> is a plain, page-less <method>%New</method>()
+object, never attached to any Zen component tree. That side-steps the live-component
+property-read trap <class>BIExport.UI.Widget.pivot</class> had to work around (reading
+a property off a component already wired into a rendering page's tree can throw
+<code><OBJECT DISPATCH> ... must be MultiDimensional</code>) - it doesn't apply here
+because this object is never attached to a page in the first place. Confirmed live
+with a throwaway script against a real fixture pivot before writing this class:
+%New() -> %CopyToComponent() -> GetCurrentQueryText("export") -> MDXExport.BuildExportData()
+round-tripped cleanly end to end.
+
+v1 limitation (also called out in README.md/CLAUDE.md): every widget is exported
+using its SAVED pivot state - whatever <property>dataSource</property> points at,
+as last saved - not whatever the CURRENT on-screen dashboard viewer session has live
+(unsaved filter changes, unsaved widget option tweaks). There's no browser session
+available to a plain server-side classmethod like this one, so live on-screen state
+genuinely isn't recoverable here - contrast with <class>BIExport.UI.Widget.pivot</class>'s
+per-widget export, which DOES reflect live state because it runs client-side against
+the actual rendered <class>%DeepSee.Component.pivotTable</class>.
+
+One more consequence of having no live pivot table widget to ask: row-header column
+captions (e.g. "YearSold", "Product Category" - see MDXExport.cls's own doc comment
+and CLAUDE.md gotcha #4) come from the pivot table WIDGET's own
+<method>getRowCaptions</method>(), which itself falls back to whatever the last
+server-rendered response happened to include - there is no equivalent available to a
+plain ObjectScript classmethod with no rendered widget at all. This class simply
+doesn't pass a <var>rowCaptions</var> option, so every widget's sheet gets the same
+generic "Row 1"/"Row 2" fallback labels <class>MDXExport</class> already uses whenever
+that option is omitted - not a new limitation, the existing documented fallback.]]></Description>
+<Super>%RegisteredObject</Super>
+<TimeChanged>67816,59602.3653416</TimeChanged>
+<TimeCreated>67816,59602.3653416</TimeCreated>
+
+<Method name="BuildDashboardExportData">
+<Description><![CDATA[
+Opens the dashboard named by <var>pDashboardFullName</var> (its full library path,
+e.g. "BIExport Test Dashboard.dashboard") and returns a <class>%DynamicObject</class>
+shaped like:
+<example>
+{
+  "title": "...",            // the dashboard's own title property
+  "dashboardName": "...",    // its fullName, echoed back
+  "sheets": [
+    {"widgetName":"Widget1", "title":"...", "data": { ...BuildExportData() shape... }},
+    {"widgetName":"Widget2", "title":"...", "error": "..."}   // widget that failed
+  ],
+  "skipped": [
+    {"widgetName":"Widget3", "title":"...", "type":"..."}     // non-pivot widget
+  ]
+}
+</example>
+One sheet entry per pivot-family widget (see <method>%IsPivotWidgetType</method>) -
+present even if that widget's own export failed, with an "error" field instead of
+"data" so one bad widget can't take down the whole export. Non-pivot-family widgets
+(chart-catalog/KPI/text) never get a sheet entry at all; they're listed separately
+under "skipped" purely so <class>BIExport.XLSXWriter</class> can mention them by name
+on the combined Info sheet, per the plan's "clear message, not a bug" call.
+
+<var>pStatus</var> is $$$OK unless the dashboard itself couldn't be opened at all -
+an individual widget failure is recorded on its own sheet entry instead, never surfaced
+through <var>pStatus</var>.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pDashboardFullName:%String,*pStatus:%Status</FormalSpec>
+<ReturnType>%DynamicObject</ReturnType>
+<Implementation><![CDATA[
+    Set pStatus = $$$OK
+    Set tResult = {}
+    Try {
+        Set tDash = ##class(%DeepSee.Dashboard.Utils).%OpenDashboard(pDashboardFullName, .pStatus)
+        If $$$ISERR(pStatus) Quit
+        If '$IsObject(tDash) {
+            Set pStatus = $$$ERROR($$$GeneralError, "Dashboard not found: "_pDashboardFullName)
+            Quit
+        }
+
+        Set tResult.title = tDash.title
+        Set tResult.dashboardName = tDash.fullName
+
+        Set tSheets = []
+        Set tSkipped = []
+        For i=1:1:tDash.widgets.Count() {
+            Set tWidget = tDash.widgets.GetAt(i)
+            If '..%IsPivotWidgetType(tWidget.type) {
+                Do tSkipped.%Push({"widgetName": (tWidget.name), "title": (tWidget.title), "type": (tWidget.type)})
+                Continue
+            }
+            Do tSheets.%Push(..%BuildWidgetSheet(tWidget))
+        }
+        Set tResult.sheets = tSheets
+        Set tResult.skipped = tSkipped
+    }
+    Catch ex {
+        Set pStatus = ex.AsStatus()
+    }
+    Quit tResult
+]]></Implementation>
+</Method>
+
+<Method name="%IsPivotWidgetType">
+<Description><![CDATA[
+True if <var>pType</var> (a widget's own <property>type</property>) is something
+resolvable the same way <class>%DeepSee.Dashboard.Widget::%CreateVisualWidget</class>
+resolves it into a real class (blank/"pivot" prefixed to
+"%DeepSee.Component.Widget.pivot"; anything containing a dot used as a literal class
+name - same prefixing rule <class>BIExport.UI.Widget.pivot</class>'s own doc comment
+already documents) AND that resolved class actually extends
+<class>%DeepSee.Component.Widget.pivot</class>. More general than
+<class>BIExport.DashboardTools</class>'s own <method>%IsPivotFamily</method> (which
+only needs to recognize its own conversion source/target literal strings) - this one
+needs to correctly classify ANY pivot-widget subclass a dashboard might already be
+using, not just the one this package ships.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pType:%String</FormalSpec>
+<Private>1</Private>
+<ReturnType>%Boolean</ReturnType>
+<Implementation><![CDATA[
+    If (pType = "") || (pType = "pivot") Quit 1
+    Set tClass = $Select(pType[".":pType, 1:"%DeepSee.Component.Widget."_pType)
+    Quit ##class(%Dictionary.CompiledClass).%ExistsId(tClass) && $ClassMethod(tClass, "%Extends", "%DeepSee.Component.Widget.pivot")
+]]></Implementation>
+</Method>
+
+<Method name="%BuildWidgetSheet">
+<Description><![CDATA[
+Resolves one pivot-family widget's saved pivot into a sheet entry - see
+<method>BuildDashboardExportData</method>'s doc comment for the shape. Never throws;
+any failure (missing/bad saved pivot, MDX error) is caught and recorded as this
+sheet's own "error" field instead.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pWidget:%DeepSee.Dashboard.Widget</FormalSpec>
+<Private>1</Private>
+<ReturnType>%DynamicObject</ReturnType>
+<Implementation><![CDATA[
+    Set tSheet = {}
+    Set tSheet.widgetName = pWidget.name
+    Set tSheet.title = $Select(pWidget.title'="":pWidget.title, 1:pWidget.name)
+    Try {
+        Set tPivotName = pWidget.dataSource
+        Set tExt = $Piece(tPivotName,".",$Length(tPivotName,"."))
+        If (tPivotName = "") || (tExt '= "pivot") {
+            // KPI ("*.kpi"), metric, worksheet, or no data source at all (e.g. a chart
+            // pulling from another widget) - %IsPivotWidgetType() only looks at the
+            // widget's rendering CLASS, not what it's actually pointed at, so this can
+            // still happen for a widget using BIExport.UI.Widget.pivot (or stock "pivot")
+            // whose dataSource isn't a plain saved pivot. Same non-fatal "error" field
+            // treatment as any other per-widget failure - just a more specific message.
+            Set tSheet.error = "Widget's data source is not a saved pivot (dataSource="""_tPivotName_"""); skipping its data."
+            Quit
+        }
+        If '##class(%DeepSee.UserLibrary.Utils).%FolderItemExists(tPivotName) {
+            Set tSheet.error = "Saved pivot not found: "_tPivotName
+            Quit
+        }
+
+        Set tPivot = ##class(%DeepSee.UserLibrary.Utils).%OpenFolderItem(tPivotName,.tSC)
+        If $$$ISERR(tSC) Throw ##class(%Exception.StatusException).CreateFromStatus(tSC)
+
+        Set tTable = ##class(%DeepSee.Component.pivotTable).%New()
+        Set tSC = tPivot.%CopyToComponent(tTable)
+        If $$$ISERR(tSC) Throw ##class(%Exception.StatusException).CreateFromStatus(tSC)
+
+        Set tMDX = tTable.GetCurrentQueryText("export")
+        // GetCurrentQueryText() never throws - on failure it returns the error text
+        // itself as the "MDX" (see its own compiled source), so a failure has to be
+        // caught by inspecting the string rather than a status/exception.
+        If ($Extract(tMDX,1,6) = "ERROR:") {
+            Set tSheet.error = tMDX
+            Quit
+        }
+
+        Set tOptions = {}
+        Set tOptions.title = tSheet.title
+        Set tOptions.subtitle = tTable.printSubtitle
+        Set tOptions.cube = tTable.cubeName
+        Set tOptions.listing = tTable.listing
+        // Crossed rowTotals/columnTotals(+Agg) mapping - see CLAUDE.md gotcha #8 and
+        // BIExport.UI.Widget.pivot's buildExportURL() doc comment: table.rowTotals
+        // renders a Totals ROW in the widget (-> our COLUMNTOTALS), table.columnTotals
+        // renders a Totals COLUMN (-> our ROWTOTALS). Same crossing, just read straight
+        // off the saved pivot's own properties instead of a live client-side table.
+        Set tOptions.rowTotals = tTable.columnTotals
+        Set tOptions.columnTotals = tTable.rowTotals
+        Set tOptions.rowTotalAgg = $Select(tTable.columnTotalAgg'="":tTable.columnTotalAgg, 1:"sum")
+        Set tOptions.columnTotalAgg = $Select(tTable.rowTotalAgg'="":tTable.rowTotalAgg, 1:"sum")
+
+        Set tSheet.data = ##class(BIExport.MDXExport).BuildExportData(tMDX, tOptions)
+    }
+    Catch ex {
+        Set tSheet.error = ex.DisplayString()
+    }
+    Quit tSheet
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="BIExport.DashboardTools">
+<Description><![CDATA[
+Rollout helper for opting existing dashboards into the real .xlsx/JSON export
+widget (<class>BIExport.UI.Widget.pivot</class>) without hand-editing dashboard XML -
+same idea as <class>BIExport.Favorites</class> (a helper method instead of a manual
+edit), but this one rewrites a dashboard's own widget definitions rather than adding
+a Portal bookmark.
+
+A widget's rendering class is just a string property on its definition -
+<property>%DeepSee.Dashboard.Widget::type</property> - confirmed live (dumping
+<method>%DeepSee.Dashboard.Widget::%CreateVisualWidget</method>'s compiled source)
+to be instantiated directly by that method, prefixed with
+"%DeepSee.Component.Widget." unless it already contains a dot. So converting a
+widget is just: open the dashboard, find the widget by its stable <property>name</property>
+(not <property>key</property>, which is an unstable hash regenerated on layout
+changes), set <property>type</property> to "BIExport.UI.Widget.pivot", <method>%Save</method>
+the dashboard.
+
+Verified end-to-end live (Playwright) against a scratch clone of
+"Basic Dashboard Demo.dashboard" before this class was written: cloning via
+<method>%ConstructClone</method>(1) + re-<method>%Save</method>-ing under a new
+<property>fullName</property> creates a genuinely independent copy (new %Id), and
+flipping a widget's <property>type</property> (even to a nonexistent class, as a
+stress test) + <method>%Save</method> + reload reliably round-trips - the dashboard
+viewer surfaced a clean in-page error for the bogus class and rendered normally again
+once the type was fixed, with no corruption either way.]]></Description>
+<Super>%RegisteredObject</Super>
+<TimeChanged>67816,54910.6869796</TimeChanged>
+<TimeCreated>67816,54910.6869796</TimeCreated>
+
+<Method name="ConvertWidget">
+<Description><![CDATA[
+Converts one widget (identified by its <property>name</property>, e.g. "Widget1" -
+see the Widgets tab of the Dashboard Editor, or dump <property>widgets</property> in
+a Terminal, for the current names) on the dashboard named by
+<var>pDashboardFullName</var> (its full library path, e.g. "Basic Dashboard Demo.dashboard")
+to <var>pNewType</var>. Refuses to convert a widget whose current <property>type</property>
+isn't recognizably in the stock pivot-widget family (bare "pivot", blank, or already
+<var>pNewType</var>/"BIExport.UI.Widget.pivot") - chart-only/KPI/text widget types
+have no confirmed compatibility with this class's <method>%OnCreateControls</method>
+override and aren't a supported target.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pDashboardFullName:%String,pWidgetName:%String,pNewType:%String="BIExport.UI.Widget.pivot"</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    Set tSC = $$$OK
+    Try {
+        Set tDash = ##class(%DeepSee.Dashboard.Utils).%OpenDashboard(pDashboardFullName, .tSC)
+        If $$$ISERR(tSC) Quit
+        If '$IsObject(tDash) {
+            Set tSC = $$$ERROR($$$GeneralError, "Dashboard not found: "_pDashboardFullName)
+            Quit
+        }
+
+        Set tWidget = ""
+        For i=1:1:tDash.widgets.Count() {
+            Set w = tDash.widgets.GetAt(i)
+            If (w.name = pWidgetName) {
+                Set tWidget = w
+                Quit
+            }
+        }
+        If '$IsObject(tWidget) {
+            Set tSC = $$$ERROR($$$GeneralError, "Widget not found on '"_pDashboardFullName_"': "_pWidgetName)
+            Quit
+        }
+
+        If '..%IsPivotFamily(tWidget.type, pNewType) {
+            Set tSC = $$$ERROR($$$GeneralError, "Widget '"_pWidgetName_"' has type '"_tWidget.type_"', not a recognized pivot-widget type - refusing to convert")
+            Quit
+        }
+
+        Set tWidget.type = pNewType
+        Set tSC = tDash.%Save()
+        If $$$ISERR(tSC) Quit
+
+        Write "Converted '"_pWidgetName_"' on '"_pDashboardFullName_"' to "_pNewType, !
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="ConvertAllWidgets">
+<Description><![CDATA[
+Same as <method>ConvertWidget</method>, but converts every widget on the dashboard
+whose current <property>type</property> is in the recognized pivot-widget family
+(see <method>%IsPivotFamily</method>) in one call. Widgets outside that family
+(chart-only, KPI, text, etc.) are silently skipped rather than erroring the whole
+call - a dashboard mixing pivot and non-pivot widgets is the normal case, not a
+mistake.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pDashboardFullName:%String,pNewType:%String="BIExport.UI.Widget.pivot"</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    Set tSC = $$$OK
+    Try {
+        Set tDash = ##class(%DeepSee.Dashboard.Utils).%OpenDashboard(pDashboardFullName, .tSC)
+        If $$$ISERR(tSC) Quit
+        If '$IsObject(tDash) {
+            Set tSC = $$$ERROR($$$GeneralError, "Dashboard not found: "_pDashboardFullName)
+            Quit
+        }
+
+        Set tConverted = 0
+        For i=1:1:tDash.widgets.Count() {
+            Set w = tDash.widgets.GetAt(i)
+            If ..%IsPivotFamily(w.type, pNewType) {
+                Set w.type = pNewType
+                Set tConverted = tConverted + 1
+            }
+        }
+
+        If (tConverted = 0) {
+            Write "No pivot-family widgets found on '"_pDashboardFullName_"' - nothing converted", !
+            Quit
+        }
+
+        Set tSC = tDash.%Save()
+        If $$$ISERR(tSC) Quit
+
+        Write "Converted "_tConverted_" widget(s) on '"_pDashboardFullName_"' to "_pNewType, !
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="RevertWidget">
+<Description><![CDATA[
+Sets a single widget's <property>type</property> back to the stock "pivot" -
+the inverse of <method>ConvertWidget</method>, for backing out the change on a
+dashboard that turns out not to want it.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pDashboardFullName:%String,pWidgetName:%String</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    Set tSC = $$$OK
+    Try {
+        Set tDash = ##class(%DeepSee.Dashboard.Utils).%OpenDashboard(pDashboardFullName, .tSC)
+        If $$$ISERR(tSC) Quit
+        If '$IsObject(tDash) {
+            Set tSC = $$$ERROR($$$GeneralError, "Dashboard not found: "_pDashboardFullName)
+            Quit
+        }
+
+        Set tWidget = ""
+        For i=1:1:tDash.widgets.Count() {
+            Set w = tDash.widgets.GetAt(i)
+            If (w.name = pWidgetName) {
+                Set tWidget = w
+                Quit
+            }
+        }
+        If '$IsObject(tWidget) {
+            Set tSC = $$$ERROR($$$GeneralError, "Widget not found on '"_pDashboardFullName_"': "_pWidgetName)
+            Quit
+        }
+
+        Set tWidget.type = "pivot"
+        Set tSC = tDash.%Save()
+        If $$$ISERR(tSC) Quit
+
+        Write "Reverted '"_pWidgetName_"' on '"_pDashboardFullName_"' to stock 'pivot'", !
+    }
+    Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="%IsPivotFamily">
+<Description><![CDATA[
+True if <var>pType</var> (a widget's current <property>type</property> value) is
+something this class is willing to convert: blank or bare "pivot" (the stock
+default, prefixed to %DeepSee.Component.Widget.pivot by %CreateVisualWidget), or
+already <var>pTargetType</var>/"BIExport.UI.Widget.pivot" (idempotent re-conversion).
+Anything else - a chart-only, KPI, text widget, or some other custom subclass - is
+not a confirmed-safe target and is treated as not-pivot-family.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pType:%String,pTargetType:%String</FormalSpec>
+<Private>1</Private>
+<ReturnType>%Boolean</ReturnType>
+<Implementation><![CDATA[    Quit (pType = "") || (pType = "pivot") || (pType = pTargetType) || (pType = "BIExport.UI.Widget.pivot")
+]]></Implementation>
+</Method>
+</Class>
+
+
 <Class name="BIExport.Favorites">
 <Description><![CDATA[
 Adds a "Favorite" bookmark in the IRIS BI User Portal (the same Favorites list
@@ -584,7 +987,7 @@ REST service exposing real-file BI exports (starting with genuine .xlsx,
 replacing the Analyzer's HTML-saved-as-.xls behavior). See CLAUDE.md for
 the design rationale and docs/iris-environment.md for how this is deployed.</Description>
 <Super>%CSP.REST</Super>
-<TimeChanged>67815,63538.7229539</TimeChanged>
+<TimeChanged>67817,35336.2760984</TimeChanged>
 <TimeCreated>67795,64951.1918431</TimeCreated>
 
 <Parameter name="HandleCorsRequest">
@@ -623,12 +1026,22 @@ POST body (JSON): {
                                        ResultSet API can't derive these on its own -
                                        this is metadata an external caller would need
                                        to already know from how it built the MDX
-}]]></Description>
+}
+Returns 503 (text/plain body, not a raw exception dump) if <class>BIExport.XLSXWriter</class>'s
+<method>IsAvailable</method> reports IRIS Embedded Python/openpyxl aren't available - see that
+method's doc comment. /json below has no such check; it needs no Python at all.]]></Description>
 <ClassMethod>1</ClassMethod>
 <ReturnType>%Status</ReturnType>
 <Implementation><![CDATA[
     Set tSC = $$$OK
     Try {
+        If '##class(BIExport.XLSXWriter).IsAvailable(.tReason) {
+            Set %response.Status = "503 Service Unavailable"
+            Set %response.ContentType = "text/plain"
+            Write tReason
+            Quit
+        }
+
         Set tBody = %request.Content
         Do tBody.Rewind()
         Set tJSONIn = tBody.Read(tBody.Size)
@@ -741,7 +1154,7 @@ name instead of the "_DeepSee.UI.Analyzer.zen" alias, e.g.
 /csp/<namespace>/BIExport.UI.Analyzer.cls?CUBE=... - point any links/shortcuts at
 this URL instead of the stock one to pick up the new options.]]></Description>
 <Super>%DeepSee.UI.Analyzer</Super>
-<TimeChanged>67815,63538.8052089</TimeChanged>
+<TimeChanged>67817,37359.9216967</TimeChanged>
 <TimeCreated>67795,64951.3229184</TimeCreated>
 
 <Parameter name="ANALYZERURL">
@@ -756,11 +1169,14 @@ on this subclass. Override with this class's own URL so navigation stays here.]]
 </Parameter>
 
 <Method name="onloadHandler">
-<Description>
+<Description><![CDATA[
 Runs after the stock page finishes its own load logic; DOM-patches the existing
-Export dropdown to add "Excel Workbook" and "JSON" items. Implemented as a DOM
-patch (rather than duplicating the dropdown-building code) so it keeps working
-even if the stock page's internal markup/ids change across versions.</Description>
+Export dropdown to add "Excel Workbook" and "JSON" items - grayed out (no click
+handler, hover text explaining why) instead of wired up if <method>IsXLSXAvailable</method>
+reports IRIS Embedded Python/openpyxl aren't available; "JSON" is never affected,
+since it has no Python dependency. Implemented as a DOM patch (rather than duplicating
+the dropdown-building code) so it keeps working even if the stock page's internal
+markup/ids change across versions.]]></Description>
 <Language>javascript</Language>
 <ClientMethod>1</ClientMethod>
 <Implementation><![CDATA[
@@ -769,11 +1185,39 @@ even if the stock page's internal markup/ids change across versions.</Descriptio
 ]]></Implementation>
 </Method>
 
+<Method name="IsXLSXAvailable">
+<Description><![CDATA[
+Synchronous server round-trip so <method>addExtraExportOptions</method> (pure client JS,
+no other server call at all) can gray out "Excel Workbook" the same way the guaranteed
+server-side surfaces already do. Confirmed live (Playwright: <code>zenPage.IsXLSXAvailable()</code>
+called with no callback argument returned its value synchronously, no async round-trip
+needed) that this IRIS version's Zen executes a <parameter>ZenMethod</parameter> call
+synchronously when the client-side stub is invoked without a callback function - the plan
+this class was built from treated this as best-effort/unverified going in; it verified
+cleanly, so it's used directly rather than falling back. Returns <code>"1"</code> if
+<method>BIExport.XLSXWriter.IsAvailable</method> is true, else <code>"0|&lt;reason&gt;"</code> -
+packed into one string rather than an <code>Output</code> parameter, since a synchronous
+ZenMethod call only gets back its one return value, never a by-reference argument.]]></Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%String</ReturnType>
+<ZenMethod>1</ZenMethod>
+<Implementation><![CDATA[
+    Set tOK = ##class(BIExport.XLSXWriter).IsAvailable(.tReason)
+    Quit $Select(tOK:"1",1:"0|"_tReason)
+]]></Implementation>
+</Method>
+
 <Method name="addExtraExportOptions">
 <Language>javascript</Language>
 <ClientMethod>1</ClientMethod>
 <Implementation><![CDATA[
     try {
+        // One round-trip for the whole page (availability can't differ per dropdown) rather
+        // than one per menu found below.
+        var xlsxStatus = zenPage.IsXLSXAvailable();
+        var xlsxAvailable = (xlsxStatus.charAt(0) === '1');
+        var xlsxReason = xlsxAvailable ? '' : xlsxStatus.substring(2);
+
         var menus = document.querySelectorAll('.dsptIconDropdownMenu');
         for (var i = 0; i < menus.length; i++) {
             var menu = menus[i];
@@ -794,8 +1238,14 @@ even if the stock page's internal markup/ids change across versions.</Descriptio
             var menuId = match ? match[1] : '';
 
             var xlsxLink = document.createElement('a');
-            xlsxLink.setAttribute('title', 'Microsoft Excel Workbook (.xlsx)');
-            xlsxLink.setAttribute('onclick', "zenPage.toggleExportMenu('" + menuId + "');zenPage.exportXLSX();");
+            if (xlsxAvailable) {
+                xlsxLink.setAttribute('title', 'Microsoft Excel Workbook (.xlsx)');
+                xlsxLink.setAttribute('onclick', "zenPage.toggleExportMenu('" + menuId + "');zenPage.exportXLSX();");
+            } else {
+                xlsxLink.setAttribute('title', xlsxReason);
+                xlsxLink.style.color = '#999999';
+                xlsxLink.style.cursor = 'not-allowed';
+            }
             xlsxLink.textContent = 'Excel Workbook';
             excelLink.parentNode.insertBefore(xlsxLink, excelLink.nextSibling);
 
@@ -966,6 +1416,285 @@ pPage is the target page class name, pExtension the default filename extension.<
 </Class>
 
 
+<Class name="BIExport.UI.DashboardViewer">
+<Description><![CDATA[
+Subclass of the stock dashboard viewer page that adds a real, whole-dashboard
+multi-sheet ".xlsx" export - one workbook with one sheet per pivot widget (see
+<class>BIExport.DashboardExport</class>/<class>BIExport.XLSXWriter.BuildMultiSheetXLSX</class>) -
+next to the per-widget "Excel Workbook"/"JSON" options <class>BIExport.UI.Widget.pivot</class>
+already adds to each widget's own export dropdown.
+
+Reachable at the same CSP application as the stock page, just under this class's
+name instead of "_DeepSee.UserPortal.DashboardViewer.zen", e.g.
+/csp/<namespace>/BIExport.UI.DashboardViewer.cls?DASHBOARD=... - point any existing
+shortcuts/links at this URL instead of the stock one to pick up the new option.
+
+DEVIATION FROM PLAN: the plan's sketch assumed an existing page-level "icon stack"
+to inject a new standalone toolbar icon next to - confirmed LIVE (dumping this page's
+compiled XData layout, then loading the real page with Playwright and screenshotting
+it) that no such thing exists. The only page-level chrome here is the "Menu" dropdown
+button (an absolutely-positioned <class>%ZEN.Component.menu</class> the plan already
+separately ruled out DOM-patching into - confirmed right, its own contextMenu content
+is server-sized) and a plain-text small-menu row - "Home | About | Save | Logout" -
+built by the overridable <method>%OnGetSmallMenu</method>(*pMenu) callback (every
+widget's OWN icon row - table/chart/dim-tree/print/export/search icons - is a
+per-widget thing already handled by <class>BIExport.UI.Widget.pivot</class>, not a
+page-level toolbar). Since there's no icon markup to model a new icon on, and
+<method>%OnGetSmallMenu</method> is a small, officially overridable server-side
+callback (confirmed live by dumping its compiled source: it just returns
+$ListBuild(caption,title,script) rows for the caller to render as text links) rather
+than a DOM structure to patch, this class adds "Export Dashboard" there instead -
+safer than a client-side DOM patch (no risk of the live-component property-read trap
+<class>BIExport.UI.Widget.pivot</class> had to work around, since nothing here reads
+a property off an already-rendered component at all) and consistent with how
+<property>ANALYZERURL</property>/<property>viewerURL</property> are also plain
+server-side overrides rather than client patches.
+
+GOTCHA hit writing this class (new, not previously documented): the stock
+<method>%OnGetSmallMenu</method>'s formal spec, as dumped from the compiled class,
+shows its one parameter's passing mechanism as "*" (Output) - but writing the
+override's own formal spec using that same bare <code>*pMenu</code> shorthand made
+THIS ENTIRE CLASS fail to compile with a generic "ERROR #5559 ... non-matching {}
+or () ... or a missing ; character" parse error (confirmed by bisection: an
+otherwise-empty method with nothing but <code>Quit</code> in its body still failed
+with the exact same error, and swapping only the formal spec to the equivalent
+<code>Output pMenu</code> keyword form fixed it immediately, with no other change).
+Lesson: <code>*name</code> is how a compiled FormalSpec DISPLAYS an Output parameter
+after the fact, not necessarily valid UDL SOURCE syntax for declaring one in every
+context - prefer the explicit <code>Output</code>/<code>ByRef</code> keywords when
+writing a method by hand instead of guessing from a dumped signature.]]></Description>
+<Super>%DeepSee.UserPortal.DashboardViewer</Super>
+<TimeChanged>67817,35761.4255793</TimeChanged>
+<TimeCreated>67816,60566.2922235</TimeCreated>
+
+<Method name="%OnAfterCreatePage">
+<Description><![CDATA[
+The stock page's own ancestor (<class>%DeepSee.UserPortal.standardPage</class>)
+seeds the client-side <property>viewerURL</property> from
+<method>%DeepSee.UserPortal.Utils::%GetViewerURL</method>() - a hardcoded literal,
+"_DeepSee.UserPortal.DashboardViewer.zen" - inside ITS OWN <method>%OnAfterCreatePage</method>
+(confirmed live by dumping both methods' compiled source). Every internal nav action
+(Open/New/Save/Save-As, drill-down, etc.) builds its redirect URL from that property,
+so left unoverridden, all of them would bounce back to the stock page - same
+"%OnAfterCreatePage sets a URL a subclass has to reassign" shape already documented
+for <property>ANALYZERURL</property> on <class>BIExport.UI.Analyzer</class>, just via
+a plain property post-assignment here instead of a class <parameter>Parameter</parameter>,
+since <property>viewerURL</property> isn't parameter-driven.]]></Description>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    Set tSC = ##super()
+    If $$$ISERR(tSC) Quit tSC
+    Set ..viewerURL = ..%ClassName(1) _ ".cls"
+    Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="%OnGetSmallMenu">
+<Description><![CDATA[
+Stock <class>%DeepSee.UserPortal.DashboardViewer</class> already overrides this
+(fully replacing, not extending, its own ancestor's Home/About/Logout list - see its
+compiled source), so calling <method>##super</method> here inherits ITS list
+(Home/About/[Save if writable]/Logout) - this just appends one more entry after it.
+See this class's own doc comment for why <var>pMenu</var> is declared
+<code>Output pMenu</code> rather than the <code>*pMenu</code> shorthand the stock
+method's own dumped signature shows.
+
+Plain string literals rather than <code>$$$Text()</code> (which every stock entry
+in this same list uses) - confirmed live that macro tries to auto-register its
+string into the "%DeepSee" message domain at COMPILE time (this class's inherited
+<parameter>DOMAIN</parameter>), which is product-owned and not writable from here:
+compiling failed with <code>&lt;PROTECT&gt;</code> deep inside
+<code>macroText^%occMessages</code>. Not worth adding a whole new message domain
+just for one menu item's localization.]]></Description>
+<FormalSpec>*pMenu</FormalSpec>
+<Implementation><![CDATA[
+    Do ##super(.pMenu)
+    Set tNext = $Order(pMenu(""),-1) + 1
+    // Whole-dashboard export needs Python too (BuildMultiSheetXLSX, same as the per-widget
+    // button) - gated here the same way as BIExport.UI.Widget.pivot's dropdown option, since
+    // this menu is also built entirely server-side. Confirmed live (dumping %DrawSmallMenu's
+    // compiled source) that this row shape - $ListBuild(caption,title,script) - has no visual
+    // "disabled" concept: every row renders with the identical "portalTitleLink" CSS class
+    // regardless of what's in it, and an empty script just makes the link's onclick a no-op
+    // ("return false;", no JS error) - so this can't be grayed out the way the pivot widget's
+    // dropdown option field (raw HTML) can. Still shown (not omitted) with a distinct caption
+    // and the reason as its hover tooltip, since a click-time landing on a friendly error is
+    // strictly worse discoverability than a link that's visibly there but explains itself on
+    // hover and does nothing when clicked.
+    //
+    // %DrawSmallMenu HTML-escapes the caption (position 1) itself but writes the title/tooltip
+    // (position 2) verbatim - confirmed the same way - so tXlsxReason is escaped here before
+    // going into that slot.
+    If ##class(BIExport.XLSXWriter).IsAvailable(.tXlsxReason) {
+        Set pMenu(tNext) = $ListBuild("Export Dashboard", "Export every pivot widget on this dashboard into one multi-sheet Excel workbook", "zenPage.exportDashboardXLSX();")
+    } Else {
+        Set pMenu(tNext) = $ListBuild("Export Dashboard (unavailable)", $ZCVT(tXlsxReason,"O","HTML"), "")
+    }
+]]></Implementation>
+</Method>
+
+<Method name="exportDashboardXLSX">
+<Description><![CDATA[
+Opens the whole-dashboard multi-sheet .xlsx export for the CURRENT dashboard (whatever
+<property>dashboardName</property> - the same client-mirrored property every other
+nav action on this page already reads - happens to be right now). Same
+same-CSP-application/window.open() rationale as
+<class>BIExport.UI.Widget.pivot</class>/<class>BIExport.UI.Analyzer</class>'s own
+export buttons: BIExport.UI.DashboardXLSXPage is a plain %CSP.Page in this SAME
+application, so the browser's already-open session covers it with no extra login.]]></Description>
+<Language>javascript</Language>
+<ClientMethod>1</ClientMethod>
+<Implementation><![CDATA[
+    if (!this.dashboardName) {
+        alert('No dashboard is currently loaded.');
+        return;
+    }
+    var url = 'BIExport.UI.DashboardXLSXPage.cls?DASHBOARD=' + encodeURIComponent(this.dashboardName);
+    window.open(zenLink(url), 'dashboardxlsx', '');
+]]></Implementation>
+</Method>
+</Class>
+
+
+<Class name="BIExport.UI.DashboardXLSXPage">
+<Description><![CDATA[
+Plain CSP page (not a separate REST application) that serves the whole-dashboard
+multi-sheet .xlsx export, deliberately mirroring <class>BIExport.UI.XLSXPage</class>'s
+own pattern (itself mirroring the stock <class>%DeepSee.UI.MDXExcel</class> page):
+living in the SAME CSP application as <class>BIExport.UI.DashboardViewer</class>, the
+page that opens it via <code>window.open()</code>, so the browser's existing login
+session is reused automatically instead of hitting the separate-session problem a
+brand-new <class>%CSP.REST</class> application would (see CLAUDE.md gotcha #3).]]></Description>
+<Super>%CSP.Page</Super>
+<TimeChanged>67817,37010.3688405</TimeChanged>
+<TimeCreated>67816,60566.7525318</TimeCreated>
+
+<Parameter name="CONTENTTYPE">
+<Default>application/vnd.openxmlformats-officedocument.spreadsheetml.sheet</Default>
+</Parameter>
+
+<Method name="OnPreHTTP">
+<Description><![CDATA[
+Sets the download filename header, AND resets the response to a plain HTML 503 when
+<method>BIExport.XLSXWriter.IsAvailable</method> reports Python/openpyxl aren't
+available. See <class>BIExport.UI.XLSXPage</class>'s own identical override for the
+full explanation - by the time OnPage() runs, %CSP.Page has already flushed the HTTP
+header block built from the CONTENTTYPE parameter above, so neither a
+%response.SetHeader() nor a %response.ContentType/%response.Status assignment made
+there takes effect (confirmed live the same way as that class).]]></Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Boolean</ReturnType>
+<Implementation><![CDATA[
+    If '##class(BIExport.XLSXWriter).IsAvailable(.tReason) {
+        Set %response.ContentType = "text/html"
+        Set %response.Status = "503 Service Unavailable"
+        Quit 1
+    }
+
+    Set tDashboard = $Get(%request.Data("DASHBOARD",1))
+    Set tFileName = ..%SuggestFileName(tDashboard)
+    Do %response.SetHeader("Content-Disposition", "attachment; filename=""" _ tFileName _ """")
+    Quit 1
+]]></Implementation>
+</Method>
+
+<Method name="%SuggestFileName">
+<Description>
+Turns a dashboard's full library path ("Folder/Name.dashboard") into a plain
+download filename ("Name.xlsx") - strips the folder path (portal organization, not
+part of the report's identity - same reasoning as the Analyzer/widget buttons
+stripping a pivot's folder prefix from their own filenames) and the ".dashboard"
+extension, then appends ".xlsx". Falls back to a generic name if DASHBOARD is blank
+(shouldn't normally happen - OnPage() below 400s on that case - but OnPreHTTP() runs
+first and has no equivalent bail-out).</Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pDashboardFullName:%String</FormalSpec>
+<Private>1</Private>
+<ReturnType>%String</ReturnType>
+<Implementation><![CDATA[
+    If (pDashboardFullName = "") Quit "dashboard-export.xlsx"
+    Set tName = pDashboardFullName
+    If (tName [ "/") { Set tName = $Piece(tName,"/",$Length(tName,"/")) }
+    If ($ZConvert($Piece(tName,".",$Length(tName,".")),"L") = "dashboard") {
+        Set tName = $Piece(tName,".",1,$Length(tName,".")-1)
+    }
+    Quit tName _ ".xlsx"
+]]></Implementation>
+</Method>
+
+<Method name="%WriteUnavailablePage">
+<Description><![CDATA[
+Writes a small, legible HTML page reporting that <method>BIExport.XLSXWriter.IsAvailable</method>
+returned false. See <class>BIExport.UI.XLSXPage</class>'s own identical method for the full
+explanation (not <code>ex.DisplayString()</code>, harmless alongside the attachment header
+OnPreHTTP already set).]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pReason:%String</FormalSpec>
+<Private>1</Private>
+<Implementation><![CDATA[
+    &html<<!DOCTYPE html>
+<html>
+<head><title>Excel Workbook export unavailable</title>
+<style>
+  body { font-family: Calibri, "Segoe UI", Arial, sans-serif; margin: 40px; color: #1B2A4A; }
+  h1 { font-size: 18px; }
+  p.reason { background: #FDEDED; border: 1px solid #F5C2C2; border-radius: 4px; padding: 12px 16px; }
+</style>
+</head>
+<body>
+<h1>Excel Workbook export is currently unavailable</h1>
+<p class="reason">#($ZCVT(pReason,"O","HTML"))#</p>
+</body>
+</html>>
+]]></Implementation>
+</Method>
+
+<Method name="OnPage">
+<Description><![CDATA[
+Query parameters: DASHBOARD - the dashboard's full library path (its
+<property>fullName</property>, e.g. "BIExport Test Dashboard.dashboard" - the same
+value <class>BIExport.UI.DashboardViewer</class>'s own <property>dashboardName</property>
+holds).]]></Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    Set tSC = $$$OK
+    Try {
+        // OnPreHTTP() already made the actual response-header decision (too late here -
+        // see that method's doc comment); this just re-checks to decide whether to write
+        // the error body or the real export.
+        If '##class(BIExport.XLSXWriter).IsAvailable(.tReason) {
+            Do ..%WriteUnavailablePage(tReason)
+            Quit
+        }
+
+        Set tDashboard = $Get(%request.Data("DASHBOARD",1))
+        If (tDashboard = "") {
+            Set %response.Status = "400 Bad Request"
+            Write "Missing DASHBOARD parameter"
+            Quit
+        }
+
+        Set tData = ##class(BIExport.DashboardExport).BuildDashboardExportData(tDashboard, .tExportSC)
+        If $$$ISERR(tExportSC) Throw ##class(%Exception.StatusException).CreateFromStatus(tExportSC)
+
+        Set tBytes = ##class(BIExport.XLSXWriter).BuildMultiSheetXLSX(tData.%ToJSON())
+
+        Set tStream = ##class(%Stream.TmpBinary).%New()
+        Do tStream.Write(tBytes)
+        Do tStream.Rewind()
+        Do tStream.OutputToDevice()
+    }
+    Catch ex {
+        Set %response.Status = "500 Internal Server Error"
+        Write ex.DisplayString()
+    }
+    Quit $$$OK
+]]></Implementation>
+</Method>
+</Class>
+
+
 <Class name="BIExport.UI.DemoPage">
 <Description><![CDATA[
 A standalone demo page for showing off <class>BIExport.XLSXWriter</class>/<class>
@@ -979,7 +1708,7 @@ same login session - no separate REST auth needed for the demo.
 
 Not part of the feature itself - a demo/sales-tool convenience only.]]></Description>
 <Super>%CSP.Page</Super>
-<TimeChanged>67815,69215.2665284</TimeChanged>
+<TimeChanged>67817,35541.0218587</TimeChanged>
 <TimeCreated>67815,69215.2665284</TimeCreated>
 
 <Parameter name="CONTENTTYPE">
@@ -990,6 +1719,8 @@ Not part of the feature itself - a demo/sales-tool convenience only.]]></Descrip
 <ClassMethod>1</ClassMethod>
 <ReturnType>%Status</ReturnType>
 <Implementation><![CDATA[
+    Set tXLSXAvailable = ##class(BIExport.XLSXWriter).IsAvailable(.tReason)
+
     &html<<!DOCTYPE html>
 <html>
 <head>
@@ -1012,11 +1743,14 @@ Not part of the feature itself - a demo/sales-tool convenience only.]]></Descrip
   .totals-row .lbl { font-size: 13px; font-weight: normal; flex: 2; }
   .buttons { margin-top: 18px; display: flex; gap: 12px; }
   button { flex: 1; padding: 12px; font-size: 14px; font-weight: bold; border: none; border-radius: 5px; cursor: pointer; color: #fff; }
+  button:disabled { background: #B0B7C3; cursor: not-allowed; }
   #btnXlsx { background: #4472C4; }
   #btnXlsx:hover { background: #35599e; }
   #btnJson { background: #595959; }
   #btnJson:hover { background: #404040; }
   .hint { font-size: 12px; color: #808080; margin-top: 6px; }
+  .banner { background: #FDEDED; border: 1px solid #F5C2C2; border-radius: 6px; padding: 12px 16px; margin-bottom: 20px; font-size: 13px; }
+  .banner b { display: block; margin-bottom: 4px; }
 </style>
 </head>
 <body>
@@ -1024,8 +1758,16 @@ Not part of the feature itself - a demo/sales-tool convenience only.]]></Descrip
   <h1>bi-export-plus</h1>
   <p>Live demo &mdash; real .xlsx / .json exports straight from MDX, no pivot required</p>
 </header>
-<main>
-  <div class="card">
+<main>>
+
+    If ('tXLSXAvailable) {
+        &html<<div class="banner">
+    <b>Excel Workbook export is disabled - see below. JSON export still works.</b>
+    #($ZCVT(tReason,"O","HTML"))#
+  </div>>
+    }
+
+    &html<<div class="card">
     <h2>1. Pick a query</h2>
     <select id="preset" onchange="applyPreset()">
       <option value="simple">Simple &mdash; Revenue &amp; Units by Region</option>
@@ -1070,9 +1812,15 @@ Not part of the feature itself - a demo/sales-tool convenience only.]]></Descrip
     <p class="hint">Independent switches - turn on either, both, or neither.</p>
   </div>
 
-  <div class="buttons">
-    <button id="btnXlsx" onclick="doExport('xlsx')">Download Excel Workbook</button>
-    <button id="btnJson" onclick="doExport('json')">Download JSON</button>
+  <div class="buttons">>
+
+    If (tXLSXAvailable) {
+        Write "<button id=""btnXlsx"" onclick=""doExport('xlsx')"">Download Excel Workbook</button>",!
+    } Else {
+        Write "<button id=""btnXlsx"" disabled title=""" _ $ZCVT(tReason,"O","HTML") _ """>Download Excel Workbook</button>",!
+    }
+
+    &html<<button id="btnJson" onclick="doExport('json')">Download JSON</button>
   </div>
 </main>
 
@@ -1219,6 +1967,428 @@ Query parameters (same names/meaning as <class>BIExport.UI.XLSXPage</class>):
 </Class>
 
 
+<Class name="BIExport.UI.Widget.pivot">
+<Description><![CDATA[
+Subclass of the stock dashboard pivot-table widget that adds real "Excel Workbook"
+(.xlsx) and "JSON" export options next to the existing "Excel"/"CSV"/"CSV with
+Headers" ones - the same idea as <class>BIExport.UI.Analyzer</class>, but for
+dashboard widgets rather than the full-page Analyzer.
+
+A dashboard widget's rendering class is swappable via its own definition: set the
+widget's <property>type</property> to "BIExport.UI.Widget.pivot" (e.g. via
+<class>BIExport.DashboardTools</class>) and <method>%DeepSee.Dashboard.Widget::%CreateVisualWidget</method>
+instantiates it directly in place of the stock "pivot" type - confirmed live by
+dumping that method's compiled source, same technique already used to confirm
+<property>ANALYZERURL</property> for <class>BIExport.UI.Analyzer</class>.
+
+Two widget UI states exist, both handled here (confirmed live by dumping
+<class>%DeepSee.Component.Widget.pivot</class>'s compiled <method>%OnCreateControls</method>):
+  - "csv" widget property off: the stock method renders a single bare
+    <img onclick="...exportExcel()"> icon - can't be DOM-patched (there's no
+    dropdown markup to patch at all), so this class's <method>%OnCreateControls</method>
+    override calls <method>%CreateExportDropdown</method> (a plain instance <class>Method</class>
+    on the stock class, callable from here) itself, after <method>##super</method> has
+    already rendered the bare icon, and swaps it out for a 3-option dropdown
+    (Excel / Excel Workbook / JSON) built from the exact same markup the "csv" widgets
+    already use natively.
+  - "csv" widget property on: the stock method already builds a
+    <caption>dsptIconDropdownMenu</caption> dropdown (Excel / CSV / CSV with Headers)
+    via that same <method>%CreateExportDropdown</method> call - left untouched
+    server-side and DOM-patched client-side instead, exactly like
+    <class>BIExport.UI.Analyzer</class> already does for the full-page Analyzer.
+
+<method>addExtraExportOptions</method> (the client-side DOM patch) has to tell these
+two cases apart so it never double-inserts into the dropdown this class's own
+<method>%OnCreateControls</method> override already built server-side with the
+extra options baked in - see that method's comment for how.]]></Description>
+<Super>%DeepSee.Component.Widget.pivot</Super>
+<TimeChanged>67817,36369.2758466</TimeChanged>
+<TimeCreated>67816,54909.7979991</TimeCreated>
+
+<Method name="%OnCreateControls">
+<Description><![CDATA[
+Calls <method>##super</method> first, unchanged, so every unrelated piece of stock
+behavior (chart toggle, dimension list, PDF export, drill-down indicator, and the
+native dropdown for "csv"=1 widgets) renders exactly as before. Only then, if the
+stock method rendered the bare single-icon export button (export on at all - "excel"
+or "csv" widget property truthy - but "csv" itself falsy), replaces that <img> child
+in <var>pGroup</var> in place with an <class>%ZEN.Component.html</class> holding a
+real dropdown - Excel (unchanged exportExcel()), "Excel Workbook" (exportXLSX()),
+JSON (exportJSON()) - built via the stock class's own <method>%CreateExportDropdown</method>(id,
+enabled, imgId, help, options) (confirmed live by dumping its compiled source: it
+just assembles the same <caption>dsptIconDropdownMenu</caption> markup
+<method>%OnCreateControls</method> already uses for "csv"=1 widgets - reusing it here
+means both UI states end up with pixel-identical dropdown markup).
+
+DEVIATION FROM PLAN: the plan sketch was to locate the stock single-icon button
+afterwards by inspecting its rendered properties (e.g. its .onclick text, the same
+marker the client-side DOM patch below uses on genuine "csv"=1 dropdowns). That does
+not work here - confirmed live, with temporary debug logging, that reading ANY
+property (.onclick, then .src as a second attempt) off a child already added to a
+<var>pGroup</var> that is itself attached to a real, currently-rendering page throws
+a live <code><OBJECT DISPATCH> Property '...' in class '%ZEN.Component.image' must
+be MultiDimensional</code> error (silently swallowed by this method's own
+Try/Catch below, which is why the symptom was "nothing happens" rather than a visible
+error) - it did NOT reproduce in an ad-hoc Terminal test building a standalone,
+page-less group/image pair, so it's specific to components already wired into a live
+page's component tree, not a general property-access rule. Reading properties off a
+*freshly built, not-yet-attached* object (see the options built below, and every
+other class in this package) is fine - it's specifically already-attached children
+that trip this.
+
+Avoided entirely by never reading a property off the live child: the target button's
+position within <var>pGroup.children</var> is instead computed arithmetically from
+the exact same flags (chart toggle / dimension list / PDF) the stock method itself
+uses to decide whether to add each preceding sibling - two of those three
+(<property>chartToggle</property>, <property>hasDimTree</property>) are simply read
+back off <var>..chartToggle</var>/<var>..hasDimTree</var> after <method>##super</method>
+returns, since stock's own <method>%OnCreateControls</method> already set them as a
+side effect on this same (our) object; the third (PDF button, "print" property) comes
+from the same <var>tPValue</var> array built below. <method>%AddChildBefore</method>/
+<method>%RemoveChild</method> only need the child's OREF (identity), never one of its
+properties, so splicing it out this way is safe.
+
+Left as a non-fatal <class>Try</class>/<class>Catch</class>: if this positional
+arithmetic ever drifts out of sync with a future stock version's own ordering (stock
+markup/logic changed shape), the widget still renders with its original single-icon
+Excel-only export button rather than breaking the whole widget.]]></Description>
+<FormalSpec>pGroup:%ZEN.Component.group</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    Set tPrevCount = pGroup.children.Count()
+    Set tSC = ##super(pGroup)
+    If $$$ISERR(tSC) Quit tSC
+
+    Try {
+        Do ..%GetWidgetPropertyInfo(..subtype, .tList)
+        Set n = $Order(tList(""))
+        While (n '= "") {
+            Set tName = $ListGet(tList(n), 1)
+            Set tPValue(tName) = ..%definition.properties.GetAt(tName)
+            Set:tPValue(tName)="" tPValue(tName) = $ListGet(tList(n), 2)
+            Set n = $Order(tList(n))
+        }
+
+        Set tExcelOn = +$Get(tPValue("excel"))
+        Set tCsvOn = +$Get(tPValue("csv"))
+
+        // Only the single-icon case needs converting - genuine csv=1 widgets already
+        // got a real dropdown from the stock method above, and the client-side
+        // onloadHandler()/addExtraExportOptions() DOM-patches those instead.
+        If (tExcelOn || tCsvOn) && ('tCsvOn) {
+            // Positional lookup - see method doc comment for why. Mirrors the exact
+            // order stock %OnCreateControls adds siblings in: chart toggle, then
+            // dimension list, then PDF, then (here) export.
+            Set tExportPos = tPrevCount
+            Set:(..chartToggle="table")||(..chartToggle="chart") tExportPos = tExportPos + 1
+            Set:..hasDimTree tExportPos = tExportPos + 1
+            Set:(+$Get(tPValue("print"))) tExportPos = tExportPos + 1
+            Set tExportPos = tExportPos + 1
+
+            Set tImgChild = ""
+            If (tExportPos > tPrevCount) && (tExportPos <= pGroup.children.Count()) {
+                Set tImgChild = pGroup.children.GetAt(tExportPos)
+            }
+
+            If $IsObject(tImgChild) {
+                Set tOptions = []
+
+                Set tExcelOpt = {"name":"Excel"}
+                Set tExcelOpt.click = "zenPage.getComponent("_..index_").exportExcel();"
+                Set tExcelOpt.hover = $$$Text("Microsoft Excel (.xls)","%DeepSee")
+                Do tOptions.%Push(tExcelOpt)
+
+                // Grayed out (via a styled span in "name" - %CreateExportDropdown writes this
+                // field verbatim as the <a>'s innerHTML, confirmed live by dumping its compiled
+                // source, so this is the only per-option visual hook it actually offers - there
+                // is no separate "disabled" flag on an individual option) and given no click
+                // handler at all when BIExport.XLSXWriter.IsAvailable() reports IRIS Embedded
+                // Python/openpyxl aren't available, with the reason as the hover tooltip -
+                // guaranteed, not best-effort, since this whole option list is already built
+                // server-side. %CreateExportDropdown writes "hover" verbatim into a title=""
+                // attribute too (same dump), so it's HTML-escaped here - IsAvailable()'s own
+                // reason text quotes CPF parameter values in double quotes, which would
+                // otherwise prematurely close that attribute.
+                Set tXlsxOpt = {"name":"Excel Workbook"}
+                If ##class(BIExport.XLSXWriter).IsAvailable(.tXlsxReason) {
+                    Set tXlsxOpt.click = "zenPage.getComponent("_..index_").exportXLSX();"
+                    Set tXlsxOpt.hover = "Microsoft Excel Workbook (.xlsx)"
+                } Else {
+                    Set tXlsxOpt.name = "<span style=""color:#999999;"">Excel Workbook</span>"
+                    Set tXlsxOpt.hover = $ZCVT(tXlsxReason,"O","HTML")
+                }
+                Do tOptions.%Push(tXlsxOpt)
+
+                Set tJsonOpt = {"name":"JSON"}
+                Set tJsonOpt.click = "zenPage.getComponent("_..index_").exportJSON();"
+                Set tJsonOpt.hover = "JSON (.json)"
+                Do tOptions.%Push(tJsonOpt)
+
+                Set tHelp = $$$Text("Export current results","%DeepSee")
+                Set tHtml = ##class(%ZEN.Component.html).%New()
+                Set tHtml.content = ..%CreateExportDropdown(..index, 1, "deepsee/ds2_action_44.png", tHelp, tOptions)
+
+                Do pGroup.%AddChildBefore(tHtml, tImgChild)
+                Do pGroup.%RemoveChild(tImgChild)
+            }
+        }
+    }
+    Catch ex {
+        // Non-fatal - see method doc comment.
+    }
+
+    Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="onloadHandler">
+<Description><![CDATA[
+Runs after the stock widget finishes its own load logic; DOM-patches the existing
+"csv"=1 Export dropdown to add "Excel Workbook"/"JSON", exactly like
+<class>BIExport.UI.Analyzer</class>'s own <method>addExtraExportOptions</method> for
+the full-page Analyzer. Two differences from that version, both because this runs
+once per widget on a dashboard that can hold several:
+  - Scoped to this widget's own DOM subtree (<method>getEnclosingDiv</method>) rather
+    than the whole document, so multiple pivot widgets on one dashboard don't step on
+    each other's dropdowns.
+  - Also has to recognize (and skip, marking it so it's never rechecked) a dropdown
+    that already has "Excel Workbook"/JSON baked in server-side by this class's own
+    <method>%OnCreateControls</method> override above (the single-icon-widget case) -
+    otherwise this client-side patch, meant only for genuine csv=1 widgets that still
+    render the unmodified stock dropdown, would double-insert into that one.]]></Description>
+<Language>javascript</Language>
+<ClientMethod>1</ClientMethod>
+<Implementation><![CDATA[
+    this.invokeSuper('onloadHandler', arguments);
+    this.addExtraExportOptions();
+]]></Implementation>
+</Method>
+
+<Method name="IsXLSXAvailable">
+<Description><![CDATA[
+Same synchronous round-trip as <class>BIExport.UI.Analyzer</class>'s own method of this
+name - see that class's doc comment for how this was confirmed live (a
+<parameter>ZenMethod</parameter> called with no callback argument returns its value
+synchronously in this IRIS version's Zen). Defined here too, rather than only on the
+page, because a widget's own client-side stub set only includes methods declared on the
+widget's OWN class (or an ancestor) - confirmed live the same way, by calling this from
+<method>addExtraExportOptions</method> below as <code>this.IsXLSXAvailable()</code> (the
+widget instance), not <code>zenPage.IsXLSXAvailable()</code> (the page).]]></Description>
+<ClassMethod>1</ClassMethod>
+<ReturnType>%String</ReturnType>
+<ZenMethod>1</ZenMethod>
+<Implementation><![CDATA[
+    Set tOK = ##class(BIExport.XLSXWriter).IsAvailable(.tReason)
+    Quit $Select(tOK:"1",1:"0|"_tReason)
+]]></Implementation>
+</Method>
+
+<Method name="addExtraExportOptions">
+<Language>javascript</Language>
+<ClientMethod>1</ClientMethod>
+<Implementation><![CDATA[
+    try {
+        var container = this.getEnclosingDiv();
+        if (!container) { return; }
+
+        // One round-trip per widget instance (not once per menu found below - there's only
+        // ever one export dropdown per widget anyway).
+        var xlsxStatus = this.IsXLSXAvailable();
+        var xlsxAvailable = (xlsxStatus.charAt(0) === '1');
+        var xlsxReason = xlsxAvailable ? '' : xlsxStatus.substring(2);
+
+        var menus = container.querySelectorAll('.dsptIconDropdownMenu');
+        for (var i = 0; i < menus.length; i++) {
+            var menu = menus[i];
+            if (menu.getAttribute('data-extraExportAdded')) { continue; }
+
+            var links = menu.getElementsByTagName('a');
+            var excelLink = null;
+            var alreadyHasXLSX = false;
+            for (var j = 0; j < links.length; j++) {
+                var onclickAttr = links[j].getAttribute('onclick') || '';
+                if (!excelLink && onclickAttr.indexOf('exportExcel') >= 0) {
+                    excelLink = links[j];
+                }
+                if (onclickAttr.indexOf('exportXLSX') >= 0) {
+                    alreadyHasXLSX = true;
+                }
+            }
+
+            // Server-rendered by %OnCreateControls above (single-icon-widget case) -
+            // already has our options, just mark it so it's skipped on future passes.
+            if (alreadyHasXLSX) {
+                menu.setAttribute('data-extraExportAdded', '1');
+                continue;
+            }
+            if (!excelLink) { continue; }
+
+            var match = (excelLink.getAttribute('onclick') || '').match(/toggleExportMenu\('([^']+)'\)/);
+            var menuId = match ? match[1] : '';
+            var prefix = 'zenPage.getComponent(' + this.index + ').toggleExportMenu(\'' + menuId + '\');zenPage.getComponent(' + this.index + ').';
+
+            var xlsxLink = document.createElement('a');
+            if (xlsxAvailable) {
+                xlsxLink.setAttribute('title', 'Microsoft Excel Workbook (.xlsx)');
+                xlsxLink.setAttribute('onclick', prefix + 'exportXLSX();');
+            } else {
+                xlsxLink.setAttribute('title', xlsxReason);
+                xlsxLink.style.color = '#999999';
+                xlsxLink.style.cursor = 'not-allowed';
+            }
+            xlsxLink.textContent = 'Excel Workbook';
+            excelLink.parentNode.insertBefore(xlsxLink, excelLink.nextSibling);
+
+            var jsonLink = document.createElement('a');
+            jsonLink.setAttribute('title', 'JSON (.json)');
+            jsonLink.setAttribute('onclick', prefix + 'exportJSON();');
+            jsonLink.textContent = 'JSON';
+            xlsxLink.parentNode.insertBefore(jsonLink, xlsxLink.nextSibling);
+
+            menu.setAttribute('data-extraExportAdded', '1');
+        }
+    }
+    catch (e) {
+        // Non-fatal: if the stock widget's DOM structure ever changes enough that this
+        // stops finding the menu, just skip adding the options rather than break the widget.
+    }
+]]></Implementation>
+</Method>
+
+<Method name="exportXLSX">
+<Description>
+Opens the real .xlsx export page for this widget's current pivot. See
+buildExportURL for why this opens a same-application CSP page instead of calling
+BIExport.REST.</Description>
+<Language>javascript</Language>
+<ClientMethod>1</ClientMethod>
+<Implementation><![CDATA[
+    var url = this.buildExportURL('BIExport.UI.XLSXPage.cls', 'xlsx');
+    if (url) { window.open(url, 'xlsx', ''); }
+]]></Implementation>
+</Method>
+
+<Method name="exportJSON">
+<Description>
+Opens the JSON export page for this widget's current pivot. See buildExportURL for
+why this opens a same-application CSP page instead of calling BIExport.REST.</Description>
+<Language>javascript</Language>
+<ClientMethod>1</ClientMethod>
+<Implementation><![CDATA[
+    var url = this.buildExportURL('BIExport.UI.JSONPage.cls', 'json');
+    if (url) { window.open(url, 'json', ''); }
+]]></Implementation>
+</Method>
+
+<Method name="buildExportURL">
+<Description><![CDATA[
+Widget-context port of <class>BIExport.UI.Analyzer</class>'s own
+<method>buildExportURL</method>, ported line-for-line from that method and the
+relevant (non-KPI, cubeName/queryKey) branch of the stock widget's own client-side
+<method>exportExcel</method> (confirmed live by dumping its compiled source) for
+anything specific to running inside a dashboard widget rather than the Analyzer page:
+  - <var>table</var> comes from <method>getPivot</method> (== <code>this.findComponent('table')</code>,
+    confirmed live), not <method>getPivot</method> on a full-page Analyzer.
+  - <var>title</var> falls back to the widget definition's own title
+    (<code>this.getDefinition().title</code>) before <var>table.printTitle</var> -
+    exactly the stock exportExcel()'s own priority order - since a dashboard widget
+    commonly has its own title distinct from the underlying saved pivot's.
+  - Nonce creation calls <code>zenPage.CreateQueryNonce</code> (a page-level method),
+    not <code>this.CreateQueryNonce</code> - confirmed by the stock exportExcel()
+    doing the same, because <var>this</var> here is the widget, not the page.
+Everything else (CUBE/LISTINGNAME, the crossed ROWTOTALS/COLUMNTOTALS/*AGG mapping -
+see CLAUDE.md's widget-property-naming gotcha, ROWCAPTIONS, FILTERNAMES/FILTERVALUES,
+FILENAME fallback) is identical to the Analyzer version.]]></Description>
+<FormalSpec>pPage,pExtension</FormalSpec>
+<Language>javascript</Language>
+<ClientMethod>1</ClientMethod>
+<Implementation><![CDATA[
+    var table = this.getPivot();
+    if (!table || ('' == table.cubeName) || ('' == table.queryKey)) {
+        return '';
+    }
+
+    var mdx = table.GetCurrentQueryText("export");
+    var nonce = '';
+    if (mdx.toString().length > 1000) {
+        // avoid long urls for IE!
+        nonce = zenPage.CreateQueryNonce(mdx);
+        if (nonce.toString().indexOf('ERROR:') >= 0) {
+            alert(nonce);
+            return '';
+        }
+    }
+
+    var url;
+    if (nonce) {
+        url = pPage + '?NONCE=' + encodeURIComponent(nonce);
+    }
+    else {
+        url = pPage + '?MDX=' + encodeURIComponent(mdx);
+    }
+
+    var widgetDef = this.getDefinition();
+    var title = (widgetDef && widgetDef.title) ? widgetDef.title : table.printTitle;
+    var subtitle = table.printSubtitle;
+    // Strip any BI-folder path prefix ("Test/Crossjoin...") - same reasoning as
+    // BIExport.UI.Analyzer.buildExportURL(): that's portal organization, not part of
+    // the report's identity, and shouldn't leak into the filename or Info sheet title.
+    if (title && title.indexOf('/') >= 0) {
+        var pathParts = title.split('/');
+        title = pathParts[pathParts.length - 1];
+    }
+    url += '&TITLE=' + encodeURIComponent(title || '');
+    url += '&SUBTITLE=' + encodeURIComponent(subtitle || '');
+    url += '&CUBE=' + encodeURIComponent(table.cubeName || '');
+    if (table.listing != '') {
+        url += '&LISTINGNAME=' + encodeURIComponent(table.listing);
+    }
+    // Crossed ROWTOTALS/COLUMNTOTALS(+AGG) mapping - see CLAUDE.md gotcha #8 and
+    // BIExport.UI.Analyzer.buildExportURL()'s own comment for the full explanation of
+    // why table.rowTotals/table.columnTotals are named the opposite of what they render.
+    if (table.rowTotals) {
+        url += '&COLUMNTOTALS=1';
+        if (table.rowTotalAgg) {
+            url += '&COLUMNTOTALAGG=' + encodeURIComponent(table.rowTotalAgg);
+        }
+    }
+    if (table.columnTotals) {
+        url += '&ROWTOTALS=1';
+        if (table.columnTotalAgg) {
+            url += '&ROWTOTALAGG=' + encodeURIComponent(table.columnTotalAgg);
+        }
+    }
+    url += '&ROWCAPTIONS=' + encodeURIComponent(table.getRowCaptions().join('\n'));
+
+    var filterNames = [];
+    var filterValues = [];
+    table.getFilterInfo(filterNames, filterValues);
+    if (filterNames.length > 0) {
+        url += '&FILTERNAMES=' + encodeURIComponent(filterNames.join('\n'));
+        url += '&FILTERVALUES=' + encodeURIComponent(filterValues.join('\n'));
+    }
+
+    var fileBase;
+    if (title) {
+        fileBase = title;
+    }
+    else {
+        // No title anywhere (ad-hoc widget pivot, no widget title set) - fall back to
+        // the cube plus a short timestamp instead of a bare "export.xlsx" that every
+        // such download would collide on. Same fallback as the Analyzer version.
+        var now = new Date();
+        var pad = function(n) { return (n < 10 ? '0' : '') + n; };
+        var ts = now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + '-' + pad(now.getHours()) + pad(now.getMinutes());
+        fileBase = (table.cubeName ? table.cubeName : 'export') + '_' + ts;
+    }
+    url += '&FILENAME=' + encodeURIComponent(fileBase + '.' + pExtension);
+
+    return zenLink(url);
+]]></Implementation>
+</Method>
+</Class>
+
+
 <Class name="BIExport.UI.XLSXPage">
 <Description><![CDATA[
 Plain CSP page (not a separate REST application) that serves the real .xlsx export,
@@ -1230,7 +2400,7 @@ would otherwise force a second login when called from inside an already-open
 Analyzer tab - this class exists specifically to avoid that.]]></Description>
 <IncludeCode>%DeepSee</IncludeCode>
 <Super>%CSP.Page</Super>
-<TimeChanged>67815,63539.3771975</TimeChanged>
+<TimeChanged>67817,37009.9761339</TimeChanged>
 <TimeCreated>67795,64951.4122832</TimeCreated>
 
 <Parameter name="CONTENTTYPE">
@@ -1238,21 +2408,72 @@ Analyzer tab - this class exists specifically to avoid that.]]></Description>
 </Parameter>
 
 <Method name="OnPreHTTP">
-<Description>
-Sets the download filename header. Must happen here, not in OnPage() - by the time
-OnPage() runs, %CSP.Page has already flushed the HTTP header block (built from the
-CONTENTTYPE parameter above), so a %response.SetHeader() call in OnPage() is too
-late to take effect (confirmed live: the header was silently absent from the actual
-response despite the OnPage() call "succeeding" - masked here because Chrome can't
-render a spreadsheet mimetype inline and downloads it regardless, unlike JSON).
-Mirrors how the stock %DeepSee.UI.MDXExcel page sets this exact header in this exact
-same method, for the same reason.</Description>
+<Description><![CDATA[
+Sets the download filename header, AND - new - resets the response to a plain HTML
+503 when <method>BIExport.XLSXWriter.IsAvailable</method> reports Python/openpyxl
+aren't available. Both have to happen here, not in OnPage() - by the time OnPage()
+runs, %CSP.Page has already flushed the HTTP header block (built from the CONTENTTYPE
+class <parameter>Parameter</parameter> above), so neither a %response.SetHeader() nor
+a %response.ContentType/%response.Status assignment made in OnPage() takes effect
+(confirmed live both ways: the Content-Disposition header was silently absent despite
+OnPage() "succeeding" - originally masked because Chrome can't render a spreadsheet
+mimetype inline and downloads it regardless of the missing header - and, separately,
+pointing IsAvailable() at a bogus module and setting %response.ContentType/Status from
+inside OnPage() still produced a 200 with the binary .xlsx content-type on the wire,
+carrying the HTML error page's bytes - exactly the corrupt-download symptom this
+feature exists to fix, just re-created by putting the fix in the wrong method).
+Mirrors how the stock %DeepSee.UI.MDXExcel page sets its own Content-Disposition
+header in this exact same method, for the same reason.
+
+NOTE (pre-existing, not fixed here - out of scope for this change): OnPage()'s existing
+%response.Status assignments for a missing MDX (400) and an unhandled exception (500)
+have this identical bug and don't reach the client either (confirmed live the same way:
+a request with no MDX param still comes back 200 with the .xlsx content-type and an
+empty body) - the fix would be the same shape (decide the status in OnPreHTTP, before
+%request's other params are known to be well-formed enough to classify), but that's a
+separate, broader change than this feature's Python-availability check.]]></Description>
 <ClassMethod>1</ClassMethod>
 <ReturnType>%Boolean</ReturnType>
 <Implementation><![CDATA[
+    If '##class(BIExport.XLSXWriter).IsAvailable(.tReason) {
+        Set %response.ContentType = "text/html"
+        Set %response.Status = "503 Service Unavailable"
+        Quit 1
+    }
+
     Set tFileName = $Get(%request.Data("FILENAME",1), "export.xlsx")
     Do %response.SetHeader("Content-Disposition", "attachment; filename=""" _ tFileName _ """")
     Quit 1
+]]></Implementation>
+</Method>
+
+<Method name="%WriteUnavailablePage">
+<Description><![CDATA[
+Writes a small, legible HTML page reporting that <method>BIExport.XLSXWriter.IsAvailable</method>
+returned false, with <var>pReason</var> (its own diagnosis of which of the two tiers -
+Embedded Python not configured, or configured but openpyxl not installed - actually failed)
+front and center - not <code>ex.DisplayString()</code>, which is a raw exception dump.
+<method>OnPreHTTP</method> has already reset the response to 503/text-html and skipped
+setting the Content-Disposition attachment header (so a browser renders this page inline
+instead of downloading it as a mystery file) by the time this runs.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pReason:%String</FormalSpec>
+<Private>1</Private>
+<Implementation><![CDATA[
+    &html<<!DOCTYPE html>
+<html>
+<head><title>Excel Workbook export unavailable</title>
+<style>
+  body { font-family: Calibri, "Segoe UI", Arial, sans-serif; margin: 40px; color: #1B2A4A; }
+  h1 { font-size: 18px; }
+  p.reason { background: #FDEDED; border: 1px solid #F5C2C2; border-radius: 4px; padding: 12px 16px; }
+</style>
+</head>
+<body>
+<h1>Excel Workbook export is currently unavailable</h1>
+<p class="reason">#($ZCVT(pReason,"O","HTML"))#</p>
+</body>
+</html>>
 ]]></Implementation>
 </Method>
 
@@ -1267,6 +2488,15 @@ Query parameters (same names/meaning as the stock MDXExcel page where they overl
 <Implementation><![CDATA[
     Set tSC = $$$OK
     Try {
+        // OnPreHTTP() already made the actual response-header decision (too late to do so
+        // here - see that method's doc comment); this just re-checks (cheap, no caching -
+        // see BIExport.XLSXWriter.IsAvailable()'s own doc comment) to decide whether to
+        // write the error body or the real export.
+        If '##class(BIExport.XLSXWriter).IsAvailable(.tReason) {
+            Do ..%WriteUnavailablePage(tReason)
+            Quit
+        }
+
         Set tNonce = $Get(%request.Data("NONCE",1))
         If (tNonce '= "") {
             Set tMDX = $Get($$$DeepSeeQueryNonceGLVN(tNonce))
@@ -1318,10 +2548,83 @@ table saved with an .xls extension).
 Layout: the data sheet is a real Excel structured Table (native autofilter/banded
 rows, sortable, recognized as a table by Excel/other tools) starting at A1 - the
 header row is never pushed down by metadata. Title/subtitle/filters instead go on
-a separate "Info" sheet, plus the workbook's own document properties.]]></Description>
+a separate "Info" sheet, plus the workbook's own document properties.
+
+<method>BuildXLSX</method> (single pivot/listing) and <method>BuildMultiSheetXLSX</method>
+(one workbook per dashboard, one sheet per pivot widget - see
+<class>BIExport.DashboardExport</class>) share the actual per-sheet writing logic via
+<method>%WriteResultSheet</method>, a private <parameter>Language = python</parameter>
+classmethod, rather than duplicating it - confirmed live, before writing either
+caller, that a live <class>openpyxl</class> <code>Worksheet</code> object built inside
+one <parameter>Language = python</parameter> classmethod can be passed as a plain
+argument into another <parameter>Language = python</parameter> classmethod of this
+same class (via <code>iris.cls('BIExport.XLSXWriter')._WriteResultSheet(ws, data, table_name)</code> -
+note the leading <code>%</code> becomes a leading <code>_</code> for Python attribute
+access, confirmed the same way) and mutated there exactly as if the call had never
+left Python - no serialization,
+no loss of identity, <parameter>Private</parameter> classmethods included. That
+confirmation is what made the shared-helper approach (rather than duplicating this
+logic per the plan's own fallback) safe to build directly.]]></Description>
 <Super>%RegisteredObject</Super>
-<TimeChanged>67815,67311.9956966</TimeChanged>
+<TimeChanged>67817,37304.8048232</TimeChanged>
 <TimeCreated>67795,64951.2405293</TimeCreated>
+
+<Method name="IsAvailable">
+<Description><![CDATA[
+Two-tier check for whether <method>BuildXLSX</method>/<method>BuildMultiSheetXLSX</method>
+can actually run: plain ObjectScript (no <parameter>Language = python</parameter>), so it's
+safe to call from anywhere - a server-side gray-out check, a REST/CSP page's top-of-method
+guard, or a client-side ZenMethod round-trip - without dragging Python into the call chain
+just to answer "is Python even there." Confirmed live (see docs/iris-environment.md and
+CLAUDE.md's Embedded Python section) that <code>##class(%SYS.Python).Import(...)</code>
+raises a catchable <class>%Exception.PythonException</class> on failure (e.g.
+<code>ModuleNotFoundError</code> for a missing package) rather than returning a %Status or
+writing to some other error channel - this method leans on that directly.
+
+Two distinct failure modes, each needing a different fix, so <var>pReason</var> is worded
+accordingly:
+  - <code>Import("sys")</code> fails: Embedded Python itself isn't configured on this
+    instance (the CPF <code>PythonRuntimeLibrary</code>/<code>PythonRuntimeLibraryVersion</code>
+    parameters are empty or wrong) - a restart is required to pick up a CPF edit, so
+    <var>pReason</var> says so rather than suggesting anything short of that.
+  - <code>Import("sys")</code> succeeds but <code>Import("openpyxl")</code> fails: Python
+    itself is fine, the package just isn't installed for whichever Python
+    <code>PythonRuntimeLibrary</code> points at - <var>pReason</var> says to
+    <code>pip install openpyxl</code> against that same Python.
+
+No caching - availability only changes via a CPF edit + restart (an extremely rare event
+relative to how often this gets called), and a fresh <code>Import()</code> on an
+already-loaded module is expected to be cheap; add caching later only if actually measured
+to matter.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>*pReason:%String</FormalSpec>
+<ReturnType>%Boolean</ReturnType>
+<Implementation><![CDATA[
+    Set pReason = ""
+    Set tAvailable = 1
+    Try {
+        Do ##class(%SYS.Python).Import("sys")
+    } Catch ex {
+        Set pReason = "IRIS Embedded Python isn't configured on this instance ("_ex.DisplayString()_"). "
+            _ "Set the CPF parameters PythonRuntimeLibrary (path to a supported Python's shared "
+            _ "library, e.g. python313.dll) and PythonRuntimeLibraryVersion (major.minor only, "
+            _ "e.g. ""3.13"") via Config.config, then restart the instance - see "
+            _ "docs/iris-environment.md's ""Embedded Python - required a fix"" section."
+        Set tAvailable = 0
+    }
+    If (tAvailable) {
+        Try {
+            Do ##class(%SYS.Python).Import("openpyxl")
+        } Catch ex {
+            Set pReason = "IRIS Embedded Python is configured, but the openpyxl package isn't "
+                _ "importable from it ("_ex.DisplayString()_"). Run pip install openpyxl against "
+                _ "whichever Python installation the PythonRuntimeLibrary CPF parameter points at."
+            Set tAvailable = 0
+        }
+    }
+    Quit tAvailable
+]]></Implementation>
+</Method>
 
 <Method name="BuildXLSX">
 <Description>
@@ -1334,11 +2637,9 @@ Returns the raw bytes of an .xlsx file.</Description>
 <Implementation><![CDATA[
 import json
 import io
-import datetime
 import openpyxl
 from openpyxl.styles import Font, PatternFill
-from openpyxl.utils import get_column_letter
-from openpyxl.worksheet.table import Table, TableStyleInfo
+import iris
 
 data = json.loads(pJSON)
 
@@ -1346,11 +2647,279 @@ wb = openpyxl.Workbook()
 ws = wb.active
 ws.title = "Export"
 
-HEADER_FONT = Font(bold=True)
 INFO_TITLE_FONT = Font(bold=True, size=14, color="FFFFFF")
 INFO_TITLE_FILL = PatternFill("solid", fgColor="4472C4")
 INFO_LABEL_FILL = PatternFill("solid", fgColor="D9E1F2")
 INFO_NOTE_FONT = Font(italic=True, color="808080")
+HEADER_FONT = Font(bold=True)
+
+# ---------------------------------------------------------------------------
+# Info sheet + document properties - title/subtitle/filters live here, never
+# inline on the data sheet, so the data sheet's header always starts at A1.
+# ---------------------------------------------------------------------------
+title = data.get("title") or ""
+subtitle = data.get("subtitle") or ""
+cube = data.get("cube") or ""
+filters = data.get("filters") or []
+
+info = wb.create_sheet("Info")
+info.sheet_view.showGridLines = False
+
+info.cell(row=1, column=1, value="Export Info")
+info.cell(row=1, column=2, value="")
+info.merge_cells(start_row=1, start_column=1, end_row=1, end_column=2)
+for col in (1, 2):
+    c = info.cell(row=1, column=col)
+    c.font = INFO_TITLE_FONT
+    c.fill = INFO_TITLE_FILL
+info.row_dimensions[1].height = 22
+
+def info_label(row, text):
+    c = info.cell(row=row, column=1, value=text)
+    c.font = HEADER_FONT
+    c.fill = INFO_LABEL_FILL
+
+r = 3
+if title:
+    info_label(r, "Report")
+    info.cell(row=r, column=2, value=title)
+    r += 1
+if cube:
+    info_label(r, "Cube")
+    info.cell(row=r, column=2, value=cube)
+    r += 1
+if subtitle:
+    info_label(r, "Subtitle")
+    info.cell(row=r, column=2, value=subtitle)
+    r += 1
+for f in filters:
+    info_label(r, f.get("name", ""))
+    info.cell(row=r, column=2, value=f.get("value", ""))
+    r += 1
+if r == 3:
+    c = info.cell(row=r, column=1, value="(no title, cube, subtitle, or filters supplied for this export)")
+    c.font = INFO_NOTE_FONT
+info.column_dimensions["A"].width = 24
+info.column_dimensions["B"].width = 50
+
+if title:
+    wb.properties.title = title
+if subtitle:
+    wb.properties.description = subtitle
+if cube:
+    wb.properties.subject = cube
+
+notes = iris.cls('BIExport.XLSXWriter')._WriteResultSheet(ws, data, "ExportTable")
+for note in notes:
+    note_cell = info.cell(row=info.max_row + 2, column=1, value=note)
+    note_cell.font = INFO_NOTE_FONT
+
+# Branding footer on the Info sheet - computed from info.max_row rather than a
+# manually-tracked counter, since earlier code writes a variable, optional number of
+# rows there (title/cube/subtitle/filters, plus any notes just above) and none of it
+# updates a shared "next free row" after writing.
+BRAND_LINK = "https://github.com/asinay/bi-export-plus"
+brand_row = info.max_row + 2
+brand_cell = info.cell(row=brand_row, column=1, value="Generated with bi-export-plus")
+brand_cell.font = INFO_NOTE_FONT
+link_cell = info.cell(row=brand_row + 1, column=1, value=BRAND_LINK)
+link_cell.hyperlink = BRAND_LINK
+link_cell.font = Font(color="0563C1", underline="single")
+
+buf = io.BytesIO()
+wb.save(buf)
+return buf.getvalue()
+]]></Implementation>
+</Method>
+
+<Method name="BuildMultiSheetXLSX">
+<Description><![CDATA[
+pJSON is the %ToJSON() output of a BIExport.DashboardExport.BuildDashboardExportData()
+result: {title, dashboardName, sheets:[{widgetName,title,data|error}], skipped:[...]}.
+Builds one combined "Info" sheet (dashboard title, a recap row per widget - sheet
+name, status, and any per-sheet note - plus the skipped-widgets list) and one data
+sheet per widget that has a "data" entry, via the same <method>%WriteResultSheet</method>
+helper <method>BuildXLSX</method> uses. A widget entry with an "error" instead of
+"data" (see <class>BIExport.DashboardExport</class>) gets a real sheet too, but with
+just that error message written on it rather than a Table/merged header - so the
+workbook always has exactly one sheet per pivot-family widget, whether or not that
+widget's own export succeeded, plus the Info sheet.
+
+Returns the raw bytes of an .xlsx file.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pJSON:%String</FormalSpec>
+<Language>python</Language>
+<ReturnType>%Binary</ReturnType>
+<Implementation><![CDATA[
+import json
+import io
+import openpyxl
+from openpyxl.styles import Font, PatternFill
+import iris
+
+data = json.loads(pJSON)
+
+wb = openpyxl.Workbook()
+info = wb.active
+info.title = "Info"
+info.sheet_view.showGridLines = False
+
+INFO_TITLE_FONT = Font(bold=True, size=14, color="FFFFFF")
+INFO_TITLE_FILL = PatternFill("solid", fgColor="4472C4")
+INFO_LABEL_FILL = PatternFill("solid", fgColor="D9E1F2")
+INFO_NOTE_FONT = Font(italic=True, color="808080")
+HEADER_FONT = Font(bold=True)
+ERROR_FONT = Font(color="C00000")
+
+dashboard_title = data.get("title") or ""
+dashboard_name = data.get("dashboardName") or ""
+sheets = data.get("sheets") or []
+skipped = data.get("skipped") or []
+
+info.cell(row=1, column=1, value="Export Info")
+info.cell(row=1, column=2, value="")
+info.merge_cells(start_row=1, start_column=1, end_row=1, end_column=2)
+for col in (1, 2):
+    c = info.cell(row=1, column=col)
+    c.font = INFO_TITLE_FONT
+    c.fill = INFO_TITLE_FILL
+info.row_dimensions[1].height = 22
+
+def info_label(row, text):
+    c = info.cell(row=row, column=1, value=text)
+    c.font = HEADER_FONT
+    c.fill = INFO_LABEL_FILL
+
+r = 3
+info_label(r, "Dashboard")
+info.cell(row=r, column=2, value=dashboard_title or dashboard_name)
+r += 1
+if dashboard_title and dashboard_name != dashboard_title:
+    info_label(r, "Path")
+    info.cell(row=r, column=2, value=dashboard_name)
+    r += 1
+r += 1
+
+info_label(r, "Widget")
+info.cell(row=r, column=2, value="Sheet")
+c = info.cell(row=r, column=3, value="Status")
+for col in (1, 2, 3):
+    info.cell(row=r, column=col).font = HEADER_FONT
+r += 1
+
+# Excel sheet-name rules (<=31 chars, none of []:*?/\, unique within the workbook) are
+# enforced by %SanitizeSheetName; used_names below is just this loop's own running list
+# so widget N+1's dedup sees widget N's already-chosen name.
+def sanitize_sheet_name(name, used):
+    return iris.cls('BIExport.XLSXWriter')._SanitizeSheetName(name, used)
+
+used_names = ["Info"]
+
+for sheet_index, sheet_entry in enumerate(sheets, start=1):
+    widget_name = sheet_entry.get("widgetName") or ""
+    sheet_title = sheet_entry.get("title") or widget_name or "Sheet"
+    sheet_name = sanitize_sheet_name(sheet_title, used_names)
+    used_names.append(sheet_name)
+
+    ws = wb.create_sheet(sheet_name)
+
+    info.cell(row=r, column=1, value=widget_name)
+    info.cell(row=r, column=2, value=sheet_name)
+
+    if "error" in sheet_entry:
+        err_cell = ws.cell(row=1, column=1, value="Error exporting this widget:")
+        err_cell.font = HEADER_FONT
+        ws.cell(row=2, column=1, value=str(sheet_entry["error"]))
+        ws.column_dimensions["A"].width = 100
+        status_cell = info.cell(row=r, column=3, value="Error - see sheet")
+        status_cell.font = ERROR_FONT
+    else:
+        # Excel Table names must be unique across the WHOLE workbook (not just per
+        # sheet) - "Table_<n>" per widget guarantees that plus Excel's identifier rules
+        # (alphanumeric/underscore, can't start with a digit), unlike the sheet's own
+        # (arbitrary, sanitized-for-different-rules) display name.
+        table_name = "Table_%d" % sheet_index
+        notes = iris.cls('BIExport.XLSXWriter')._WriteResultSheet(ws, sheet_entry.get("data") or {}, table_name)
+        info.cell(row=r, column=3, value="OK")
+        for note in notes:
+            r += 1
+            note_cell = info.cell(row=r, column=2, value=note)
+            note_cell.font = INFO_NOTE_FONT
+    r += 1
+
+if not sheets:
+    info.cell(row=r, column=1, value="(no pivot widgets found on this dashboard)")
+    info.cell(row=r, column=1).font = INFO_NOTE_FONT
+    r += 1
+
+if skipped:
+    r += 1
+    note_cell = info.cell(row=r, column=1,
+               value="Skipped (not a pivot-family widget - chart/KPI/text widgets have "
+                     "no exportable pivot data of their own):")
+    note_cell.font = INFO_NOTE_FONT
+    r += 1
+    for sk in skipped:
+        info.cell(row=r, column=1, value=sk.get("widgetName", ""))
+        info.cell(row=r, column=2, value=sk.get("title", "") or sk.get("type", ""))
+        r += 1
+
+info.column_dimensions["A"].width = 24
+info.column_dimensions["B"].width = 40
+info.column_dimensions["C"].width = 18
+
+if dashboard_title:
+    wb.properties.title = dashboard_title
+
+BRAND_LINK = "https://github.com/asinay/bi-export-plus"
+brand_row = info.max_row + 2
+brand_cell = info.cell(row=brand_row, column=1, value="Generated with bi-export-plus")
+brand_cell.font = INFO_NOTE_FONT
+link_cell = info.cell(row=brand_row + 1, column=1, value=BRAND_LINK)
+link_cell.hyperlink = BRAND_LINK
+link_cell.font = Font(color="0563C1", underline="single")
+
+buf = io.BytesIO()
+wb.save(buf)
+return buf.getvalue()
+]]></Implementation>
+</Method>
+
+<Method name="%WriteResultSheet">
+<Description><![CDATA[
+Shared per-sheet writer for one BuildExportData()-shaped `data` dict, used by both
+<method>BuildXLSX</method> (writing to its one "Export" sheet) and
+<method>BuildMultiSheetXLSX</method> (writing to one sheet per widget). Builds either
+a real Excel Table (the common case) or - when the column axis has more than one
+level (<var>colHeaderDepth</var> > 1) - a true merged multi-row header with no Table
+at all, exactly as the original single-sheet BuildXLSX always has (see the "Nested
+column headers" tradeoff in README.md). Returns a (possibly empty) list of plain-text
+notes the caller should surface somewhere on its own Info sheet - currently just the
+nested-header/no-Table explanation, when that branch is taken.
+
+pWs is a live openpyxl Worksheet already created (and, other than its title, still
+blank) by the caller; this method writes into it directly and returns without saving
+or otherwise touching the workbook. pTableName is the Excel Table's displayName (only
+used when a real Table gets built at all - see the colHeaderDepth>1 branch below) -
+Excel requires Table names to be unique across the WHOLE workbook, not just per
+sheet, so a multi-sheet caller must pass a distinct name per widget; a single-sheet
+caller can just pass the fixed "ExportTable" name this always used before this method
+was extracted out of BuildXLSX.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pWs,pData,pTableName</FormalSpec>
+<Language>python</Language>
+<Private>1</Private>
+<Implementation><![CDATA[
+import datetime
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.table import Table, TableStyleInfo
+
+ws = pWs
+data = pData
+notes = []
+
+HEADER_FONT = Font(bold=True)
 col_widths = {}
 
 def touch_width(col_idx, text):
@@ -1409,63 +2978,6 @@ def finalize_table(min_col, max_col, last_row, table_name, headers):
 def safe_name(name, fallback):
     return name if name else fallback
 
-# ---------------------------------------------------------------------------
-# Info sheet + document properties - title/subtitle/filters live here, never
-# inline on the data sheet, so the data sheet's header always starts at A1.
-# ---------------------------------------------------------------------------
-title = data.get("title") or ""
-subtitle = data.get("subtitle") or ""
-cube = data.get("cube") or ""
-filters = data.get("filters") or []
-
-info = wb.create_sheet("Info")
-info.sheet_view.showGridLines = False
-
-info.cell(row=1, column=1, value="Export Info")
-info.cell(row=1, column=2, value="")
-info.merge_cells(start_row=1, start_column=1, end_row=1, end_column=2)
-for col in (1, 2):
-    c = info.cell(row=1, column=col)
-    c.font = INFO_TITLE_FONT
-    c.fill = INFO_TITLE_FILL
-info.row_dimensions[1].height = 22
-
-def info_label(row, text):
-    c = info.cell(row=row, column=1, value=text)
-    c.font = HEADER_FONT
-    c.fill = INFO_LABEL_FILL
-
-r = 3
-if title:
-    info_label(r, "Report")
-    info.cell(row=r, column=2, value=title)
-    r += 1
-if cube:
-    info_label(r, "Cube")
-    info.cell(row=r, column=2, value=cube)
-    r += 1
-if subtitle:
-    info_label(r, "Subtitle")
-    info.cell(row=r, column=2, value=subtitle)
-    r += 1
-for f in filters:
-    info_label(r, f.get("name", ""))
-    info.cell(row=r, column=2, value=f.get("value", ""))
-    r += 1
-if r == 3:
-    c = info.cell(row=r, column=1, value="(no title, cube, subtitle, or filters supplied for this export)")
-    c.font = INFO_NOTE_FONT
-info_next_row = r
-info.column_dimensions["A"].width = 24
-info.column_dimensions["B"].width = 50
-
-if title:
-    wb.properties.title = title
-if subtitle:
-    wb.properties.description = subtitle
-if cube:
-    wb.properties.subject = cube
-
 kind = data.get("kind", "cellset")
 
 if kind == "listing":
@@ -1482,7 +2994,7 @@ if kind == "listing":
                 ws.cell(row=2 + i, column=j + 1, value=val)
                 touch_width(j + 1, val)
         last_row = 1 + len(rows)
-        finalize_table(1, len(headers), last_row, "ExportTable", headers)
+        finalize_table(1, len(headers), last_row, pTableName or "ExportTable", headers)
         ws.freeze_panes = "A2"
 else:
     col_header_depth = data.get("colHeaderDepth", 0)
@@ -1581,11 +3093,9 @@ else:
 
         ws.freeze_panes = "%s%d" % (get_column_letter(row_header_depth + 1), first_data_row)
 
-        note_cell = info.cell(row=info_next_row, column=1,
-                   value="Note: this pivot has a dimension on Columns (multi-level column "
-                         "header), so this sheet keeps a true merged header instead of a "
-                         "flattened Excel Table - no autofilter/banded rows on this export.")
-        note_cell.font = INFO_NOTE_FONT
+        notes.append("'%s': this pivot has a dimension on Columns (multi-level column "
+                     "header), so its sheet keeps a true merged header instead of a "
+                     "flattened Excel Table - no autofilter/banded rows on this sheet." % ws.title)
     else:
         has_row_totals = row_totals is not None
         has_col_totals = column_totals is not None
@@ -1638,7 +3148,7 @@ else:
 
         last_row = totals_row_num if totals_row_num else last_data_row
         all_headers = row_headers_text + col_headers_text + (["Total"] if has_row_totals else [])
-        tbl = finalize_table(1, last_col, last_row, "ExportTable", all_headers)
+        tbl = finalize_table(1, last_col, last_row, pTableName or "ExportTable", all_headers)
 
         if totals_row_num:
             tbl.totalsRowShown = True
@@ -1657,21 +3167,37 @@ else:
 for idx, width in col_widths.items():
     ws.column_dimensions[get_column_letter(idx)].width = min(max(width + 2, 8), 60)
 
-# Branding footer on the Info sheet - computed from info.max_row rather than a
-# manually-tracked counter, since earlier branches write a variable, optional
-# number of rows there (title/cube/subtitle/filters, plus the nested-column-
-# header note) and none of them update a shared "next free row" after writing.
-BRAND_LINK = "https://github.com/asinay/bi-export-plus"
-brand_row = info.max_row + 2
-brand_cell = info.cell(row=brand_row, column=1, value="Generated with bi-export-plus")
-brand_cell.font = INFO_NOTE_FONT
-link_cell = info.cell(row=brand_row + 1, column=1, value=BRAND_LINK)
-link_cell.hyperlink = BRAND_LINK
-link_cell.font = Font(color="0563C1", underline="single")
+return notes
+]]></Implementation>
+</Method>
 
-buf = io.BytesIO()
-wb.save(buf)
-return buf.getvalue()
+<Method name="%SanitizeSheetName">
+<Description><![CDATA[
+Sanitizes+dedupes a candidate Excel sheet name: strips the characters Excel forbids
+in a sheet name (<code>[ ] : * ? / \</code>), truncates to Excel's 31-character
+limit, and - given the list of names already used earlier in the same workbook
+(<var>pUsed</var>, mutated in place is NOT relied on; caller re-appends the result
+itself) - appends " (2)", " (3)", etc. until the name is unique, re-truncating as
+needed so the suffixed form still fits in 31 characters.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>pName,pUsed</FormalSpec>
+<Language>python</Language>
+<Private>1</Private>
+<Implementation><![CDATA[
+INVALID_CHARS = set('[]:*?/\\')
+base = ''.join(ch for ch in (pName or 'Sheet') if ch not in INVALID_CHARS).strip()
+if not base:
+    base = 'Sheet'
+base = base[:31]
+
+used_lower = set(u.lower() for u in (pUsed or []))
+candidate = base
+n = 2
+while candidate.lower() in used_lower:
+    suffix = ' (%d)' % n
+    candidate = base[:31 - len(suffix)] + suffix
+    n += 1
+return candidate
 ]]></Implementation>
 </Method>
 </Class>

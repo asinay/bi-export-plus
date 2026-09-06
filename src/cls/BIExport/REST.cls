@@ -36,10 +36,20 @@ XData UrlMap
 ///                                        this is metadata an external caller would need
 ///                                        to already know from how it built the MDX
 /// }
+/// Returns 503 (text/plain body, not a raw exception dump) if <class>BIExport.XLSXWriter</class>'s
+/// <method>IsAvailable</method> reports IRIS Embedded Python/openpyxl aren't available - see that
+/// method's doc comment. /json below has no such check; it needs no Python at all.
 ClassMethod ExportXLSX() As %Status
 {
     Set tSC = $$$OK
     Try {
+        If '##class(BIExport.XLSXWriter).IsAvailable(.tReason) {
+            Set %response.Status = "503 Service Unavailable"
+            Set %response.ContentType = "text/plain"
+            Write tReason
+            Quit
+        }
+
         Set tBody = %request.Content
         Do tBody.Rewind()
         Set tJSONIn = tBody.Read(tBody.Size)

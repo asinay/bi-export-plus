@@ -1,7 +1,10 @@
 /// Thin subclass of the stock BI Analyzer page that adds real "Excel Workbook" (.xlsx)
 /// and "JSON" options to the existing Export dropdown (alongside Excel/CSV/CSV with
 /// Heading), calling <class>BIExport.UI.XLSXPage</class>/<class>BIExport.UI.JSONPage</class>
-/// instead of the HTML-saved-as-.xls exporter.
+/// instead of the HTML-saved-as-.xls exporter. Also depends on
+/// <class>BIExport.XLSXWriter</class>, whose <method>IsAvailable</method> backs this
+/// class's own <method>IsXLSXAvailable</method> ZenMethod - the gray-out check for
+/// "Excel Workbook" when IRIS Embedded Python/openpyxl aren't set up.
 ///
 /// Reachable at the same CSP application as the stock page, just under this class's
 /// name instead of the "_DeepSee.UI.Analyzer.zen" alias, e.g.
@@ -19,18 +22,44 @@ Class BIExport.UI.Analyzer Extends %DeepSee.UI.Analyzer
 Parameter ANALYZERURL = "BIExport.UI.Analyzer.cls";
 
 /// Runs after the stock page finishes its own load logic; DOM-patches the existing
-/// Export dropdown to add "Excel Workbook" and "JSON" items. Implemented as a DOM
-/// patch (rather than duplicating the dropdown-building code) so it keeps working
-/// even if the stock page's internal markup/ids change across versions.
+/// Export dropdown to add "Excel Workbook" and "JSON" items - grayed out (no click
+/// handler, hover text explaining why) instead of wired up if <method>IsXLSXAvailable</method>
+/// reports IRIS Embedded Python/openpyxl aren't available; "JSON" is never affected,
+/// since it has no Python dependency. Implemented as a DOM patch (rather than duplicating
+/// the dropdown-building code) so it keeps working even if the stock page's internal
+/// markup/ids change across versions.
 ClientMethod onloadHandler() [ Language = javascript ]
 {
     this.invokeSuper('onloadHandler', arguments);
     this.addExtraExportOptions();
 }
 
+/// Synchronous server round-trip so <method>addExtraExportOptions</method> (pure client JS,
+/// no other server call at all) can gray out "Excel Workbook" the same way the guaranteed
+/// server-side surfaces already do. Confirmed live (Playwright: <code>zenPage.IsXLSXAvailable()</code>
+/// called with no callback argument returned its value synchronously, no async round-trip
+/// needed) that this IRIS version's Zen executes a <parameter>ZenMethod</parameter> call
+/// synchronously when the client-side stub is invoked without a callback function - the plan
+/// this class was built from treated this as best-effort/unverified going in; it verified
+/// cleanly, so it's used directly rather than falling back. Returns <code>"1"</code> if
+/// <method>BIExport.XLSXWriter.IsAvailable</method> is true, else <code>"0|&lt;reason&gt;"</code> -
+/// packed into one string rather than an <code>Output</code> parameter, since a synchronous
+/// ZenMethod call only gets back its one return value, never a by-reference argument.
+ClassMethod IsXLSXAvailable() As %String [ ZenMethod ]
+{
+    Set tOK = ##class(BIExport.XLSXWriter).IsAvailable(.tReason)
+    Quit $Select(tOK:"1",1:"0|"_tReason)
+}
+
 ClientMethod addExtraExportOptions() [ Language = javascript ]
 {
     try {
+        // One round-trip for the whole page (availability can't differ per dropdown) rather
+        // than one per menu found below.
+        var xlsxStatus = zenPage.IsXLSXAvailable();
+        var xlsxAvailable = (xlsxStatus.charAt(0) === '1');
+        var xlsxReason = xlsxAvailable ? '' : xlsxStatus.substring(2);
+
         var menus = document.querySelectorAll('.dsptIconDropdownMenu');
         for (var i = 0; i < menus.length; i++) {
             var menu = menus[i];
@@ -51,8 +80,14 @@ ClientMethod addExtraExportOptions() [ Language = javascript ]
             var menuId = match ? match[1] : '';
 
             var xlsxLink = document.createElement('a');
-            xlsxLink.setAttribute('title', 'Microsoft Excel Workbook (.xlsx)');
-            xlsxLink.setAttribute('onclick', "zenPage.toggleExportMenu('" + menuId + "');zenPage.exportXLSX();");
+            if (xlsxAvailable) {
+                xlsxLink.setAttribute('title', 'Microsoft Excel Workbook (.xlsx)');
+                xlsxLink.setAttribute('onclick', "zenPage.toggleExportMenu('" + menuId + "');zenPage.exportXLSX();");
+            } else {
+                xlsxLink.setAttribute('title', xlsxReason);
+                xlsxLink.style.color = '#999999';
+                xlsxLink.style.cursor = 'not-allowed';
+            }
             xlsxLink.textContent = 'Excel Workbook';
             excelLink.parentNode.insertBefore(xlsxLink, excelLink.nextSibling);
 

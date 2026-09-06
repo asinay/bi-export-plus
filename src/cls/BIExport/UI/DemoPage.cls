@@ -15,6 +15,8 @@ Parameter CONTENTTYPE = "text/html";
 
 ClassMethod OnPage() As %Status
 {
+    Set tXLSXAvailable = ##class(BIExport.XLSXWriter).IsAvailable(.tReason)
+
     &html<<!DOCTYPE html>
 <html>
 <head>
@@ -37,11 +39,14 @@ ClassMethod OnPage() As %Status
   .totals-row .lbl { font-size: 13px; font-weight: normal; flex: 2; }
   .buttons { margin-top: 18px; display: flex; gap: 12px; }
   button { flex: 1; padding: 12px; font-size: 14px; font-weight: bold; border: none; border-radius: 5px; cursor: pointer; color: #fff; }
+  button:disabled { background: #B0B7C3; cursor: not-allowed; }
   #btnXlsx { background: #4472C4; }
   #btnXlsx:hover { background: #35599e; }
   #btnJson { background: #595959; }
   #btnJson:hover { background: #404040; }
   .hint { font-size: 12px; color: #808080; margin-top: 6px; }
+  .banner { background: #FDEDED; border: 1px solid #F5C2C2; border-radius: 6px; padding: 12px 16px; margin-bottom: 20px; font-size: 13px; }
+  .banner b { display: block; margin-bottom: 4px; }
 </style>
 </head>
 <body>
@@ -49,8 +54,16 @@ ClassMethod OnPage() As %Status
   <h1>bi-export-plus</h1>
   <p>Live demo &mdash; real .xlsx / .json exports straight from MDX, no pivot required</p>
 </header>
-<main>
-  <div class="card">
+<main>>
+
+    If ('tXLSXAvailable) {
+        &html<<div class="banner">
+    <b>Excel Workbook export is disabled - see below. JSON export still works.</b>
+    #($ZCVT(tReason,"O","HTML"))#
+  </div>>
+    }
+
+    &html<<div class="card">
     <h2>1. Pick a query</h2>
     <select id="preset" onchange="applyPreset()">
       <option value="simple">Simple &mdash; Revenue &amp; Units by Region</option>
@@ -95,9 +108,15 @@ ClassMethod OnPage() As %Status
     <p class="hint">Independent switches - turn on either, both, or neither.</p>
   </div>
 
-  <div class="buttons">
-    <button id="btnXlsx" onclick="doExport('xlsx')">Download Excel Workbook</button>
-    <button id="btnJson" onclick="doExport('json')">Download JSON</button>
+  <div class="buttons">>
+
+    If (tXLSXAvailable) {
+        Write "<button id=""btnXlsx"" onclick=""doExport('xlsx')"">Download Excel Workbook</button>",!
+    } Else {
+        Write "<button id=""btnXlsx"" disabled title=""" _ $ZCVT(tReason,"O","HTML") _ """>Download Excel Workbook</button>",!
+    }
+
+    &html<<button id="btnJson" onclick="doExport('json')">Download JSON</button>
   </div>
 </main>
 
