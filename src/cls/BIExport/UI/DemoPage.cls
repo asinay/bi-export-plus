@@ -73,10 +73,14 @@ ClassMethod OnPage() As %Status
     </select>
 
     <label for="mdx">MDX query</label>
-    <textarea id="mdx"></textarea>
+    <textarea id="mdx" oninput="syncFiltersFromMdx()"></textarea>
 
     <label for="title">Report title</label>
     <input type="text" id="title">
+
+    <label for="filters">Filters (one per line, <code>Name = Value</code>)</label>
+    <textarea id="filters" placeholder="Region = West"></textarea>
+    <p class="hint">Auto-parsed from the query's <code>%FILTER</code> clause when you paste MDX (e.g. straight from the Analyzer) - shows raw member keys, not resolved friendly captions, since that's all a bare MDX string carries. Still shown as an editable recap block on the exported Info sheet, so tweak it by hand if you want nicer labels/values.</p>
   </div>
 
   <div class="card">
@@ -143,10 +147,38 @@ var PRESETS = {
   custom: { mdx: "", title: "", cube: "HOLEFOODS", rowCaptions: "" }
 };
 
+// Best-effort: pulls member keys out of the query's %FILTER clause by regex, grouped
+// by their innermost level name (the bracket segment right before the final ".&[key]"
+// or ".[MemberName]"). Raw MDX carries no friendly dimension/level captions - the
+// %DeepSee.ResultSet API can't derive those either (see CLAUDE.md) - so this shows
+// keys as they appear in the query, not resolved display names.
+function extractFiltersFromMDX(mdx) {
+  var idx = mdx.search(/%FILTER\b/i);
+  if (idx === -1) { return []; }
+  var clause = mdx.slice(idx);
+  var re = /((?:\[[^\]]+\]\.)+)&?\[([^\]]+)\]/g;
+  var order = [];
+  var groups = {};
+  var m;
+  while ((m = re.exec(clause)) !== null) {
+    var segments = m[1].match(/\[([^\]]+)\]/g).map(function (s) { return s.slice(1, -1); });
+    var level = segments[segments.length - 1];
+    var key = m[2];
+    if (!groups[level]) { groups[level] = []; order.push(level); }
+    groups[level].push(key);
+  }
+  return order.map(function (level) { return level + ' = ' + groups[level].join(', '); });
+}
+
+function syncFiltersFromMdx() {
+  document.getElementById('filters').value = extractFiltersFromMDX(document.getElementById('mdx').value).join('\n');
+}
+
 function applyPreset() {
   var p = PRESETS[document.getElementById('preset').value];
   document.getElementById('mdx').value = p.mdx;
   document.getElementById('title').value = p.title;
+  syncFiltersFromMdx();
 }
 
 function doExport(ext) {
@@ -162,6 +194,23 @@ function doExport(ext) {
   if (preset.rowCaptions) {
     url += '&ROWCAPTIONS=' + encodeURIComponent(preset.rowCaptions);
   }
+
+  var filterNames = [];
+  var filterValues = [];
+  document.getElementById('filters').value.split('\n').forEach(function (line) {
+    var eq = line.indexOf('=');
+    if (eq === -1) { return; }
+    var name = line.slice(0, eq).trim();
+    var value = line.slice(eq + 1).trim();
+    if (!name) { return; }
+    filterNames.push(name);
+    filterValues.push(value);
+  });
+  if (filterNames.length > 0) {
+    url += '&FILTERNAMES=' + encodeURIComponent(filterNames.join('\n'));
+    url += '&FILTERVALUES=' + encodeURIComponent(filterValues.join('\n'));
+  }
+
   if (document.getElementById('rowTotals').checked) {
     url += '&ROWTOTALS=1&ROWTOTALAGG=' + document.getElementById('rowTotalAgg').value;
   }
