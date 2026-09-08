@@ -17,6 +17,15 @@ COPY module.xml .
 COPY src src
 COPY iris.script /tmp/iris.script
 
+# A landing page at /csp/user/index.html - static files bypass this app's normal CSP
+# login requirement (ServeFiles=2 on /csp/user), so it's the one URL a docker-run user
+# can open with no login. IRIS's own web server has no directory-index/default-document
+# support (confirmed live: a bare "/" or "/csp/user/" request 404s even with an
+# index.html/index.csp physically present - only an exact filename resolves), so
+# "http://localhost:52773/csp/user/index.html" is the shortest URL actually achievable,
+# not truly the bare host:port.
+COPY --chown=${ISC_PACKAGE_MGRUSER}:${ISC_PACKAGE_IRISGROUP} docker/landing/ ${ISC_PACKAGE_INSTALLDIR}/csp/user/
+
 # Installs Samples-BI (sample cubes/dashboards to export) and this module (via ZPM's
 # directory-load form, from the copied source rather than the public registry) into
 # the default USER namespace, then enables DeepSee there.

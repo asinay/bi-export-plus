@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>bi-export-plus</title>
+<meta charset="utf-8">
+<style>
+  body { font-family: Calibri, "Segoe UI", Arial, sans-serif; margin: 0; background: #0B0F17; color: #C9CFDB; }
+  header { border-bottom: 1px solid #202836; padding: 22px 32px; display: flex; align-items: center; gap: 16px; }
+  header img { width: 44px; height: 44px; border-radius: 6px; }
+  header .name { font-size: 19px; font-weight: bold; color: #F1F3F8; }
+  header .tagline { font-size: 13px; color: #7C889C; margin-top: 2px; }
+  main { max-width: 700px; margin: 0 auto; padding: 32px 20px 60px; line-height: 1.55; }
+  main > p { font-size: 14.5px; color: #B6BCC9; }
+  a { color: #6FA8FF; text-decoration: none; border-bottom: 1px solid rgba(111,168,255,0.35); }
+  a:hover { border-bottom-color: #6FA8FF; }
+  figure { margin: 28px 0; text-align: center; background: #F4F6FA; padding: 14px; border-radius: 6px; }
+  figure img { max-width: 100%; border-radius: 4px; display: block; margin: 0 auto; }
+  figcaption { font-size: 12px; color: #8B93A3; margin-top: 10px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em; color: #7C889C; margin: 40px 0 4px; border-bottom: 1px solid #202836; padding-bottom: 8px; }
+  dl { margin: 0; }
+  dt { margin-top: 18px; font-size: 15.5px; }
+  dt a { font-weight: bold; color: #8FBBFF; }
+  dt .badge { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; color: #8FBBFF; border: 1px solid #35507A; border-radius: 3px; padding: 1px 6px; margin-left: 8px; font-weight: bold; }
+  dd { margin: 3px 0 0; font-size: 13.5px; color: #8B93A3; }
+  code { background: #1B222E; color: #C9CFDB; padding: 1px 5px; border-radius: 3px; font-size: 12.5px; }
+  footer { border-top: 1px solid #202836; padding: 18px 20px; text-align: center; font-size: 12.5px; color: #7C889C; }
+</style>
+</head>
+<body>
+<header>
+  <img src="logo.png" alt="bi-export-plus logo">
+  <div>
+    <div class="name">bi-export-plus</div>
+    <div class="tagline">Real, binary .xlsx and typed JSON exports for the IRIS BI/DeepSee Analyzer</div>
+  </div>
+</header>
+<main>
+
+  <p>The Analyzer's stock "Export to Excel" button writes an HTML table with an
+  <code>.xls</code> extension - Excel opens it, but it's not a real workbook. This adds
+  an actual <code>.xlsx</code> (real cell types, number formats, a genuine Excel Table)
+  and a typed JSON export, wired directly into the Analyzer's own Export dropdown.
+  This container comes with <a href="https://github.com/intersystems/Samples-BI" target="_blank">Samples-BI</a>
+  preloaded, so everything below works immediately.</p>
+
+  <figure>
+    <img src="export-dropdown.png" alt="Excel Workbook and JSON entries in the Analyzer's Export dropdown">
+    <figcaption>The new entries, next to the stock Excel/CSV options.</figcaption>
+  </figure>
+
+  <h2>Try it</h2>
+  <dl>
+    <dt><a href="BIExport.UI.DemoPage.cls">Live demo</a></dt>
+    <dd>A canned MDX query, no pivot needed - download a real .xlsx or .json in one click.</dd>
+
+    <dt><a href="BIExport.UI.Analyzer.cls?CUBE=HOLEFOODS">Analyzer, on HoleFoods</a></dt>
+    <dd>Build a pivot, then use the same "Excel Workbook"/"JSON" buttons shown above.</dd>
+
+    <dt><a href="BIExport.UI.DashboardViewer.cls?DASHBOARD=Basic%20Dashboard%20Demo.dashboard">Export a whole dashboard</a><span class="badge">multi-sheet</span></dt>
+    <dd>Open the sample dashboard, click <b>Export Dashboard</b> at the bottom - one workbook, one sheet per widget, no setup needed.</dd>
+
+    <dt><a href="../sys/UtilHome.csp">Management Portal</a></dt>
+    <dd>Login <code>_SYSTEM</code> / <code>SYS</code> if you want to poke around namespaces and classes directly.</dd>
+  </dl>
+
+</main>
+<footer>
+  <a href="https://github.com/asinay/bi-export-plus">github.com/asinay/bi-export-plus</a> &middot; MIT licensed
+</footer>
+</body>
+</html>
