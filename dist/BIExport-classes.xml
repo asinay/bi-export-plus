@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Export generator="IRIS" version="26" zv="IRIS for Windows (x86-64) 2026.1 (Build 234U)" ts="2026-09-07 22:10:31">
+<Export generator="IRIS" version="26" zv="IRIS for Windows (x86-64) 2026.1 (Build 234U)" ts="2026-10-15 10:09:26">
 <Class name="BIExport.DashboardExport">
 <Description><![CDATA[
 Pure ObjectScript (no Python): resolves every pivot widget on a saved dashboard into
@@ -1147,14 +1147,17 @@ collide on a single literal "export.xlsx".]]></Description>
 Thin subclass of the stock BI Analyzer page that adds real "Excel Workbook" (.xlsx)
 and "JSON" options to the existing Export dropdown (alongside Excel/CSV/CSV with
 Heading), calling <class>BIExport.UI.XLSXPage</class>/<class>BIExport.UI.JSONPage</class>
-instead of the HTML-saved-as-.xls exporter.
+instead of the HTML-saved-as-.xls exporter. Also depends on
+<class>BIExport.XLSXWriter</class>, whose <method>IsAvailable</method> backs this
+class's own <method>IsXLSXAvailable</method> ZenMethod - the gray-out check for
+"Excel Workbook" when IRIS Embedded Python/openpyxl aren't set up.
 
 Reachable at the same CSP application as the stock page, just under this class's
 name instead of the "_DeepSee.UI.Analyzer.zen" alias, e.g.
 /csp/<namespace>/BIExport.UI.Analyzer.cls?CUBE=... - point any links/shortcuts at
 this URL instead of the stock one to pick up the new options.]]></Description>
 <Super>%DeepSee.UI.Analyzer</Super>
-<TimeChanged>67817,37359.9216967</TimeChanged>
+<TimeChanged>67858,36550.4517133</TimeChanged>
 <TimeCreated>67795,64951.3229184</TimeCreated>
 
 <Parameter name="ANALYZERURL">
@@ -2051,7 +2054,7 @@ two cases apart so it never double-inserts into the dropdown this class's own
 <method>%OnCreateControls</method> override already built server-side with the
 extra options baked in - see that method's comment for how.]]></Description>
 <Super>%DeepSee.Component.Widget.pivot</Super>
-<TimeChanged>67817,36369.2758466</TimeChanged>
+<TimeChanged>67858,36057.9713617</TimeChanged>
 <TimeCreated>67816,54909.7979991</TimeCreated>
 
 <Method name="%OnCreateControls">
@@ -2186,6 +2189,40 @@ Excel-only export button rather than breaking the whole widget.]]></Description>
         // Non-fatal - see method doc comment.
     }
 
+    Quit tSC
+]]></Implementation>
+</Method>
+
+<Method name="%GetCatalogInfo">
+<Description><![CDATA[
+Fixes https://github.com/asinay/bi-export-plus/issues/1: the Dashboard Editor's
+widget Settings panel resolves a widget's property schema via
+<method>%DeepSee.Dashboard.Utils::%GetWidgetClass</method>, which matches the
+dashboard widget's own <property>type</property> value against the
+<var>pInfo</var> catalog <method>%GetCatalogInfo</method> builds for every
+subclass of <class>%DeepSee.Component.Widget.widget</class> (confirmed live by
+dumping <class>%DeepSee.Dashboard.Utils</class>' and
+<class>%DeepSee.UserPortal.DashboardViewer</class>'s compiled source) - but the
+stock <method>%GetCatalogInfo</method> this class inherits registers that catalog
+entry under <method>%ClassName(0)</method> (the short, package-stripped class name,
+"pivot" for both the stock class and this one). <class>BIExport.DashboardTools</class>
+sets a converted widget's <property>type</property> to this class's *full* name
+("BIExport.UI.Widget.pivot" - needed because the dashboard *viewer*'s
+<method>%CreateVisualWidget</method> uses <property>type</property> directly as a
+class reference, not a catalog keyword), which never equals the inherited "pivot"
+catalog entry - so <method>%GetWidgetClass</method> finds no match, the Editor's
+settings lookup resolves to an empty class, and the Settings panel renders with no
+properties at all. Registering this class's own catalog entry under its full name
+instead - the exact string <method>ConvertWidget</method> writes into
+<property>type</property> - lets <method>%GetWidgetClass</method> find it;
+<method>%GetWidgetPropertyInfo</method> is left inherited unchanged, since the
+property list itself is identical to the stock pivot widget's.]]></Description>
+<ClassMethod>1</ClassMethod>
+<FormalSpec>*pInfo:%List,*pSubtypeList:%List</FormalSpec>
+<ReturnType>%Status</ReturnType>
+<Implementation><![CDATA[
+    Set tSC = ##super(.pInfo, .pSubtypeList)
+    Set pInfo = $LB(..%ClassName(1), $LG(pInfo,2), $LG(pInfo,3), $LG(pInfo,4), $LG(pInfo,5))
     Quit tSC
 ]]></Implementation>
 </Method>
