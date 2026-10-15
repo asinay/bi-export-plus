@@ -165,6 +165,35 @@ Method %OnCreateControls(pGroup As %ZEN.Component.group) As %Status
     Quit tSC
 }
 
+/// Fixes https://github.com/asinay/bi-export-plus/issues/1: the Dashboard Editor's
+/// widget Settings panel resolves a widget's property schema via
+/// <method>%DeepSee.Dashboard.Utils::%GetWidgetClass</method>, which matches the
+/// dashboard widget's own <property>type</property> value against the
+/// <var>pInfo</var> catalog <method>%GetCatalogInfo</method> builds for every
+/// subclass of <class>%DeepSee.Component.Widget.widget</class> (confirmed live by
+/// dumping <class>%DeepSee.Dashboard.Utils</class>' and
+/// <class>%DeepSee.UserPortal.DashboardViewer</class>'s compiled source) - but the
+/// stock <method>%GetCatalogInfo</method> this class inherits registers that catalog
+/// entry under <method>%ClassName(0)</method> (the short, package-stripped class name,
+/// "pivot" for both the stock class and this one). <class>BIExport.DashboardTools</class>
+/// sets a converted widget's <property>type</property> to this class's *full* name
+/// ("BIExport.UI.Widget.pivot" - needed because the dashboard *viewer*'s
+/// <method>%CreateVisualWidget</method> uses <property>type</property> directly as a
+/// class reference, not a catalog keyword), which never equals the inherited "pivot"
+/// catalog entry - so <method>%GetWidgetClass</method> finds no match, the Editor's
+/// settings lookup resolves to an empty class, and the Settings panel renders with no
+/// properties at all. Registering this class's own catalog entry under its full name
+/// instead - the exact string <method>ConvertWidget</method> writes into
+/// <property>type</property> - lets <method>%GetWidgetClass</method> find it;
+/// <method>%GetWidgetPropertyInfo</method> is left inherited unchanged, since the
+/// property list itself is identical to the stock pivot widget's.
+ClassMethod %GetCatalogInfo(Output pInfo As %List, Output pSubtypeList As %List) As %Status
+{
+    Set tSC = ##super(.pInfo, .pSubtypeList)
+    Set pInfo = $LB(..%ClassName(1), $LG(pInfo,2), $LG(pInfo,3), $LG(pInfo,4), $LG(pInfo,5))
+    Quit tSC
+}
+
 /// Runs after the stock widget finishes its own load logic; DOM-patches the existing
 /// "csv"=1 Export dropdown to add "Excel Workbook"/"JSON", exactly like
 /// <class>BIExport.UI.Analyzer</class>'s own <method>addExtraExportOptions</method> for
